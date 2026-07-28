@@ -1,0 +1,110 @@
+{
+  "expo": {
+    "name": "YSClaude",
+    "slug": "YSClaude",
+    "version": "1.0.9",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "scheme": "ysclaude",
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "icon": "./assets/icon.png",
+      "adaptiveIcon": {
+        "backgroundImage": "./assets/android-icon-background.png",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "permissions": [
+        "android.permission.PACKAGE_USAGE_STATS",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION",
+        "android.permission.FOREGROUND_SERVICE_MICROPHONE",
+        "android.permission.FOREGROUND_SERVICE_CAMERA",
+        "android.permission.FOREGROUND_SERVICE_SPECIAL_USE",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.READ_CALENDAR",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.WRITE_CALENDAR",
+        "android.permission.READ_CONTACTS",
+        "android.permission.WRITE_CONTACTS",
+        "android.permission.CALL_PHONE",
+        "android.permission.CAMERA"
+      ],
+      "package": "com.ysclaude.app"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router",
+      "@livekit/react-native-expo-plugin",
+      "@config-plugins/react-native-webrtc",
+      "expo-splash-screen",
+      "expo-sqlite",
+      [
+        "expo-notifications",
+        {
+          "color": "#ffffff"
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "enableBackgroundPlayback": true
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "允许 YSClaude 获取当前位置，以便发送位置卡片给 AI。"
+        }
+      ],
+      [
+        "expo-calendar",
+        {
+          "calendarPermission": "允许 YSClaude 读取和管理你的日历日程，以便在你开启日历 Tool 后执行日程相关请求。",
+          "remindersPermission": false
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "允许 YSClaude 访问相册，以便保存 AI 生成的图片。",
+          "savePhotosPermission": "允许 YSClaude 将 AI 生成的图片保存到相册。",
+          "granularPermissions": [
+            "photo"
+          ]
+        }
+      ],
+      "expo-asset",
+      [
+        "expo-sharing",
+        {
+          "android": {
+            "enabled": true,
+            "singleShareMimeTypes": [
+              "text/plain",
+              "text/*",
+              "*/*"
+            ],
+            "multipleShareMimeTypes": [
+              "text/plain",
+              "text/*",
+              "*/*"
+            ]
+          }
+        }
+      ]
+    ],
+    "extra": {
+      "router": {}
+    }
+  }
+}

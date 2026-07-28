@@ -1,0 +1,134 @@
+:root {
+  --z-popover: 5000;
+  line-height: 1.5;
+  font-weight: 400;
+  color: var(--text-main, #0f172a);
+  background-color: #f1f5f9;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  min-height: 100dvh;
+  background: var(--page-bg);
+  font-family: var(--font-sans);
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-variant-numeric: tabular-nums;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: #ffd6e7;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: #ffc2d9;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+html.no-fx,
+html.no-fx body {
+  background: #f8fafc !important;
+}
+
+html.no-fx,
+html.no-fx *,
+html.no-fx *::before,
+html.no-fx *::after {
+  animation: none !important;
+  transition: none !important;
+  filter: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+html.no-fx {
+  --blur: 0px;
+  --page-bg: #f8fafc;
+}
+
+#root {
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+#root input:not([type='checkbox']):not([type='radio']),
+#root textarea,
+#root select {
+  font-size: 16px;
+}
+
+@media (max-width: 768px) {
+  #root input:not([type='checkbox']):not([type='radio']),
+  #root textarea,
+  #root select {
+    font-size: 16px !important;
+  }
+
+  body.chat-page-active {
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+
+  body.chat-page-active #root {
+    height: 100dvh;
+  }
+
+  html.settings-page-active,
+  html.settings-page-active body,
+  body.settings-page-active {
+    height: auto;
+    overflow: auto !important;
+    overscroll-behavior: auto;
+  }
+
+  body.settings-page-active #root {
+    height: 100%;
+  }
+}
+
+
+html.no-fx .app-shell {
+  background: #f8fafc !important;
+}
+
+html.no-fx .chat-page,
+html.no-fx .rp-room-dashboard-page,
+html.no-fx .rp-rooms-page {
+  background: #f8fafc !important;
+}
+
+html.no-fx .chat-page::before,
+html.no-fx .rp-room-dashboard-page::before,
+html.no-fx .rp-rooms-page::before,
+html.no-fx .rp-rooms-page::after,
+html.no-fx .sessions-overlay,
+html.no-fx .sessions-drawer::before {
+  background: none !important;
+  opacity: 0 !important;
+}

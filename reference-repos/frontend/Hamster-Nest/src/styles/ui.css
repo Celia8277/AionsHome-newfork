@@ -1,0 +1,197 @@
+:root {
+  --font-sans: 'Nunito', -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Segoe UI',
+    Roboto, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', Arial,
+    sans-serif;
+  --font-rounded: 'Nunito', 'Quicksand', 'Comfortaa', 'Avenir Next Rounded', 'Arial Rounded MT Bold', var(--font-sans);
+  --font-display: 'Rounded Mplus 1c', 'Nunito', system-ui, -apple-system, 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  --accent: #ffd6e7;
+  --accent-strong: #f8bad4;
+  --text-main: #111827;
+  --text-subtle: #6b7280;
+  --glass-bg: rgba(255, 255, 255, 0.22);
+  --glass-border: rgba(255, 255, 255, 0.35);
+  --shadow-soft: 0 12px 30px rgba(0, 0, 0, 0.08);
+  --radius-card: 28px;
+  --radius-tile: 20px;
+  --radius-btn: 16px;
+  --blur: 16px;
+  --page-bg: linear-gradient(180deg, #fdf2f8 0%, #f8fafc 52%, #f3f4f6 100%);
+}
+
+.ui-title {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1.15;
+  text-transform: none;
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
+}
+
+.ui-numeric {
+  font-family: var(--font-rounded);
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+.glass-card,
+.glass-panel {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--shadow-soft);
+  backdrop-filter: blur(var(--blur));
+  -webkit-backdrop-filter: blur(var(--blur));
+}
+
+.glass-card {
+  border-radius: var(--radius-card);
+  padding: 1rem;
+}
+
+.glass-panel {
+  border-radius: calc(var(--radius-card) + 4px);
+  padding: 1rem;
+}
+
+.btn-primary,
+.btn-secondary,
+.btn-danger {
+  border: none;
+  border-radius: var(--radius-btn);
+  min-height: 42px;
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  transition: background-color 160ms ease, transform 120ms ease, box-shadow 160ms ease;
+  cursor: pointer;
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: var(--text-main);
+  box-shadow: 0 6px 14px rgba(249, 168, 212, 0.34);
+}
+
+.btn-primary:hover {
+  background: color-mix(in srgb, var(--accent) 86%, #fff 14%);
+}
+
+.btn-primary:active {
+  background: var(--accent-strong);
+  transform: translateY(1px);
+}
+
+.btn-secondary {
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--text-main);
+  border: 1px solid rgba(209, 213, 219, 0.9);
+}
+
+.btn-danger {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.input-glass,
+.textarea-glass {
+  border: 1px solid color-mix(in srgb, var(--glass-border) 72%, #d1d5db 28%);
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--text-main);
+  border-radius: var(--radius-tile);
+  padding: 10px 14px;
+  font-size: 16px;
+  line-height: 1.45;
+  outline: none;
+}
+
+.input-glass:focus,
+.textarea-glass:focus {
+  border-color: color-mix(in srgb, var(--accent) 62%, #fda4af 38%);
+  box-shadow: 0 0 0 3px rgba(255, 214, 231, 0.36);
+}
+
+.top-nav {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: transparent;
+  background-image: none;
+  color: var(--text-main);
+  border-bottom: 1px solid var(--glass-border);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.06);
+}
+
+.app-shell {
+  min-height: 100vh;
+  min-height: 100dvh;
+  height: 100vh;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--page-bg);
+}
+
+.app-shell__header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  padding-top: env(safe-area-inset-top);
+  background: transparent;
+  background-image: none;
+  color: var(--text-main);
+  border-bottom: 1px solid var(--glass-border);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.06);
+}
+
+.app-shell__header::before,
+.app-shell__header::after {
+  background: none;
+}
+
+.app-shell__content {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  background: transparent;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+@media (max-width: 768px) {
+  .btn-primary,
+  .btn-secondary,
+  .btn-danger,
+  .input-glass,
+  .textarea-glass {
+    font-size: 16px;
+  }
+}
+
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .glass-card,
+  .glass-panel {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: rgba(255, 255, 255, 0.76);
+  }
+
+  .top-nav {
+    background-image: none;
+  }
+}
+
+@media (max-width: 560px) {
+  .glass-card,
+  .glass-panel,
+  .input-glass,
+  .textarea-glass {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: rgba(255, 255, 255, 0.35);
+  }
+
+  .top-nav {
+    background-image: none;
+  }
+}

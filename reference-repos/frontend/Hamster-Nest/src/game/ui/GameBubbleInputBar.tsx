@@ -1,0 +1,128 @@
+import { useState, type FormEvent, type KeyboardEvent } from 'react'
+
+const HistoryIcon = () => (
+  <svg viewBox="0 0 24 24" className="game-button-icon" aria-hidden="true" focusable="false">
+    <path
+      d="M12 5a7 7 0 1 1-6.2 3.75"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+    <path
+      d="M5 4v4h4"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+    <path
+      d="M12 8.5v4l2.5 1.5"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+)
+
+const SendIcon = () => (
+  <svg viewBox="0 0 24 24" className="game-button-icon" aria-hidden="true" focusable="false">
+    <path
+      d="M4 12 19 5l-3.5 14-4.5-5-7-2Z"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+    <path
+      d="M11 14 19 5"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+)
+
+type GameBubbleInputBarProps = {
+  onSend: (text: string) => void
+  onOpenHistory: () => void
+  disabled?: boolean
+}
+
+const GameBubbleInputBar = ({ onSend, onOpenHistory, disabled }: GameBubbleInputBarProps) => {
+  const [draft, setDraft] = useState('')
+
+  const submit = () => {
+    const trimmed = draft.trim()
+    if (!trimmed || disabled) {
+      return
+    }
+    onSend(trimmed)
+    setDraft('')
+  }
+
+  const handleSubmit = (event: FormEvent) => {
+    event.preventDefault()
+    submit()
+  }
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.nativeEvent.isComposing) {
+      return
+    }
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      submit()
+    }
+  }
+
+  return (
+    <form
+      className="game-bubble-input-bar"
+      aria-label="气泡聊天输入栏"
+      onSubmit={handleSubmit}
+    >
+      <div className="game-bubble-input-bar__main-input">
+        <input
+          type="text"
+          className="game-bubble-input-bar__input"
+          placeholder="跟 Syzygy 说点什么..."
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={handleKeyDown}
+          disabled={disabled}
+          aria-label="气泡聊天输入框"
+        />
+      </div>
+
+      <div className="game-bubble-input-bar__mini-stack" aria-label="聊天快捷操作">
+        <button
+          type="button"
+          className="game-bubble-input-bar__history-button"
+          aria-label="聊天历史记录"
+          onClick={onOpenHistory}
+        >
+          <HistoryIcon />
+        </button>
+
+        <button
+          type="submit"
+          className="game-bubble-input-bar__send-button"
+          disabled={disabled || !draft.trim()}
+          aria-label="发送消息"
+        >
+          <SendIcon />
+        </button>
+      </div>
+    </form>
+  )
+}
+
+export default GameBubbleInputBar

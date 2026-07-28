@@ -1,0 +1,15 @@
+node_modules
+dist
+.DS_Store
+.env
+.env.*
+*.local
+*.log
+*.diff
+*.tsbuildinfo
+coverage
+docs/XIAOWU_*CHECKLIST.md
+icon-preview.html
+build
+release
+out

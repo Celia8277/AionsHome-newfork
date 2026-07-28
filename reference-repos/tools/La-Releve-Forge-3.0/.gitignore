@@ -1,0 +1,13 @@
+node_modules/
+*.log
+.DS_Store
+Thumbs.db
+
+# 本地实验/私有数据——永远不要提交你自己的会话、摘要和便签
+*.jsonl
+releve-summary.md
+releve-tailnotes.md
+releve-handoff/
+forge_history.json
+*.bak
+*.bak.*
