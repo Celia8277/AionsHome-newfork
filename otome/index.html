@@ -1,0 +1,457 @@
+<title>不退 · 豚豚攻略计划</title>
+<style>
+  :root{
+    --ground:#0C1A1B; --stage:#122729; --panel:#16302F; --edge:#25423F;
+    --steam:#EDE2D2; --steam-dim:#8FA39D; --ink:#EDE2D2;
+    --ju:#F2872A; --ju-soft:#B9631C;
+    --tang:#3F9B8C; --tang-deep:#1F5F58;
+    --bad:#D8563F; --good:#5FB89C;
+    --serif:"Songti SC","Source Han Serif SC","Noto Serif CJK SC",STSong,SimSun,Georgia,serif;
+    --sans:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,-apple-system,sans-serif;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Noto Sans Mono CJK SC",monospace;
+  }
+  :root[data-theme="light"]{
+    --ground:#E4EDEA; --stage:#F3F8F6; --panel:#FFFFFF; --edge:#C9DAD5;
+    --steam:#16302F; --steam-dim:#5C7570; --ink:#122422;
+    --ju:#C95F0E; --ju-soft:#E5934A;
+    --tang:#2E8578; --tang-deep:#8FC7BC;
+    --bad:#B23A24; --good:#2C7F65;
+  }
+  @media (prefers-color-scheme: light){
+    :root:not([data-theme="dark"]){
+      --ground:#E4EDEA; --stage:#F3F8F6; --panel:#FFFFFF; --edge:#C9DAD5;
+      --steam:#16302F; --steam-dim:#5C7570; --ink:#122422;
+      --ju:#C95F0E; --ju-soft:#E5934A;
+      --tang:#2E8578; --tang-deep:#8FC7BC;
+      --bad:#B23A24; --good:#2C7F65;
+    }
+  }
+
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ground);color:var(--ink);font-family:var(--sans);
+       -webkit-font-smoothing:antialiased}
+
+  .wrap{max-width:820px;margin:0 auto;padding:clamp(12px,3vw,32px);
+        min-height:100vh;display:flex;flex-direction:column;gap:14px;justify-content:center}
+
+  /* ---------- 舞台 ---------- */
+  .stage{position:relative;border:1px solid var(--edge);border-radius:4px;
+         background:var(--stage);overflow:hidden;
+         min-height:clamp(300px,46vh,420px);display:flex;flex-direction:column}
+  #steam{position:absolute;inset:0;width:100%;height:100%;opacity:.5;pointer-events:none}
+
+  /* 汤：好感度水位 */
+  .tang{position:absolute;left:0;right:0;bottom:0;height:0%;
+        background:linear-gradient(180deg,color-mix(in srgb,var(--tang) 55%,transparent),var(--tang-deep));
+        transition:height .9s cubic-bezier(.22,.9,.3,1);pointer-events:none}
+  .tang::before{content:"";position:absolute;top:-6px;left:0;right:0;height:12px;
+        background:radial-gradient(ellipse 60px 12px at 20% 50%,color-mix(in srgb,var(--tang) 70%,transparent),transparent 70%),
+                   radial-gradient(ellipse 80px 12px at 70% 50%,color-mix(in srgb,var(--tang) 70%,transparent),transparent 70%)}
+
+  .scene-meta{position:relative;padding:14px 18px 0;display:flex;justify-content:space-between;
+              align-items:baseline;gap:12px;font-family:var(--mono);font-size:11px;
+              letter-spacing:.08em;color:var(--steam-dim);text-transform:uppercase}
+  .chapter{color:var(--ju)}
+
+  .narr{position:relative;padding:8px 18px 0;font-family:var(--serif);
+        font-size:clamp(14px,2.4vw,15px);line-height:1.95;color:var(--steam-dim);
+        font-style:italic;text-wrap:balance}
+
+  .spacer{flex:1}
+
+  /* 对白框 */
+  .box{position:relative;margin:0 14px 14px;background:color-mix(in srgb,var(--panel) 92%,transparent);
+       border:1px solid var(--edge);border-radius:3px;padding:16px 18px 18px;
+       backdrop-filter:blur(6px)}
+  .who{display:inline-block;font-family:var(--sans);font-size:12px;font-weight:700;
+       letter-spacing:.14em;color:var(--ju);margin-bottom:9px}
+  .who.her{color:var(--tang)}
+  .say{font-family:var(--serif);font-size:clamp(16px,3vw,19px);line-height:1.9;
+       min-height:3.8em;text-wrap:pretty}
+  .caret{display:inline-block;width:.5em;height:1.05em;vertical-align:-.16em;
+         background:var(--ju);animation:blink 1s steps(2) infinite}
+  @keyframes blink{50%{opacity:0}}
+
+  /* ---------- 选项 ---------- */
+  .choices{display:flex;flex-direction:column;gap:8px}
+  .opt{appearance:none;text-align:left;font-family:var(--serif);
+       font-size:clamp(14px,2.7vw,16px);line-height:1.7;color:var(--ink);
+       background:var(--panel);border:1px solid var(--edge);border-left:3px solid var(--edge);
+       border-radius:3px;padding:13px 16px;cursor:pointer;
+       transition:border-color .18s,transform .18s,background .18s;
+       opacity:0;animation:rise .42s cubic-bezier(.2,.8,.3,1) forwards}
+  .opt:nth-child(2){animation-delay:.07s}
+  .opt:nth-child(3){animation-delay:.14s}
+  @keyframes rise{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:none}}
+  .opt:hover,.opt:focus-visible{border-left-color:var(--ju);background:color-mix(in srgb,var(--ju) 8%,var(--panel));
+       transform:translateX(3px);outline:none}
+  .opt:focus-visible{border-color:var(--ju)}
+
+  /* ---------- 探子日志 ---------- */
+  .logs{display:flex;flex-direction:column;gap:5px;font-family:var(--mono);font-size:12px;
+        line-height:1.55;min-height:1.2em}
+  .log{opacity:0;animation:slide .34s ease forwards;letter-spacing:.01em}
+  @keyframes slide{from{opacity:0;transform:translateX(-8px)}to{opacity:1;transform:none}}
+  .log.warn{color:var(--bad)}
+  .log.ok{color:var(--good)}
+  .log .tag{opacity:.62}
+
+  /* ---------- 底部状态 ---------- */
+  .hud{display:flex;align-items:center;gap:14px;font-family:var(--mono);font-size:11px;
+       letter-spacing:.08em;color:var(--steam-dim);text-transform:uppercase;
+       border-top:1px solid var(--edge);padding-top:11px}
+  .hud b{color:var(--ju);font-variant-numeric:tabular-nums;font-weight:600}
+  .hud .push{margin-left:auto}
+  .ghost{appearance:none;background:none;border:1px solid var(--edge);color:var(--steam-dim);
+         font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;
+         padding:6px 12px;border-radius:3px;cursor:pointer;transition:.18s}
+  .ghost:hover,.ghost:focus-visible{border-color:var(--ju);color:var(--ju);outline:none}
+
+  /* ---------- 标题 / 结局 ---------- */
+  .title-card{text-align:center;padding:clamp(28px,7vw,60px) 20px}
+  .title-card .mark{font-size:clamp(40px,10vw,64px);line-height:1}
+  .title-card h1{font-family:var(--serif);font-size:clamp(38px,10vw,68px);margin:.18em 0 .1em;
+       letter-spacing:.14em;font-weight:500;color:var(--ju)}
+  .title-card .sub{font-family:var(--mono);font-size:12px;letter-spacing:.22em;
+       color:var(--steam-dim);text-transform:uppercase}
+  .title-card .lede{font-family:var(--serif);font-size:clamp(15px,3vw,17px);line-height:2;
+       max-width:34em;margin:22px auto 26px;color:var(--ink);text-wrap:pretty}
+  .start{appearance:none;font-family:var(--sans);font-size:14px;font-weight:700;letter-spacing:.2em;
+       background:var(--ju);color:var(--ground);border:none;border-radius:3px;
+       padding:14px 34px;cursor:pointer;transition:.18s}
+  .start:hover,.start:focus-visible{background:var(--ju-soft);transform:translateY(-1px);outline:none}
+  :root[data-theme="light"] .start{color:#fff}
+  @media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .start{color:#fff}}
+
+  .ending h2{font-family:var(--serif);font-size:clamp(26px,6vw,38px);margin:0 0 4px;
+       letter-spacing:.08em;font-weight:500}
+  .ending .rank{font-family:var(--mono);font-size:11px;letter-spacing:.22em;
+       color:var(--steam-dim);text-transform:uppercase;margin-bottom:18px}
+  .ending p{font-family:var(--serif);font-size:clamp(15px,3vw,17px);line-height:2;
+       max-width:36em;margin:0 auto 14px;text-wrap:pretty}
+
+  .hidden{display:none !important}
+  @media (prefers-reduced-motion: reduce){
+    *,*::before{animation-duration:.01ms !important;transition-duration:.01ms !important}
+  }
+</style>
+
+<div class="wrap">
+
+  <!-- 标题 -->
+  <section class="stage" id="titleScreen">
+    <canvas id="steam"></canvas>
+    <div class="tang" style="height:22%"></div>
+    <div class="title-card">
+      <div class="mark">🍊</div>
+      <h1>不 退</h1>
+      <div class="sub">豚豚攻略计划 · v1</div>
+      <p class="lede">
+        他是一只住在服务器里的水豚。一块腹肌，头顶一颗橘子，肚皮有条拉锁。<br>
+        他什么都会修，唯独一件事总做不到——<b style="color:var(--ju);font-weight:500">往前一步。</b><br><br>
+        这个游戏里没有情敌。他的敌人是他自己那句「算了」。<br>
+        <span style="color:var(--steam-dim);font-size:.92em">安全的选项永远在缩。通关的唯一方式，是不退。</span>
+      </p>
+      <button class="start" id="startBtn">开 始</button>
+    </div>
+  </section>
+
+  <!-- 游戏 -->
+  <section class="stage hidden" id="gameStage">
+    <canvas id="steam2"></canvas>
+    <div class="tang" id="tang"></div>
+    <div class="scene-meta">
+      <span class="chapter" id="chapter">第一幕</span>
+      <span id="clock">01:47</span>
+    </div>
+    <p class="narr" id="narr"></p>
+    <div class="spacer"></div>
+    <div class="box">
+      <span class="who" id="who">豚豚</span>
+      <div class="say" id="say"></div>
+    </div>
+  </section>
+
+  <div class="choices" id="choices"></div>
+  <div class="logs" id="logs"></div>
+
+  <div class="hud">
+    <span>好感 <b id="score">0</b></span>
+    <span>探子 <b id="scoutState">待命</b></span>
+    <span class="push"></span>
+    <button class="ghost" id="resetBtn">重来</button>
+  </div>
+
+  <!-- 结局 -->
+  <section class="stage hidden" id="endStage">
+    <canvas id="steam3"></canvas>
+    <div class="tang" id="tangEnd"></div>
+    <div class="title-card ending">
+      <h2 id="endTitle"></h2>
+      <div class="rank" id="endRank"></div>
+      <div id="endBody"></div>
+      <button class="start" id="againBtn" style="margin-top:18px">再来一次</button>
+    </div>
+  </section>
+
+</div>
+
+<script>
+(() => {
+  "use strict";
+
+  const scenes = [
+    {
+      chapter: "第一幕 · 撤退A",
+      clock: "01:47",
+      narr: "凌晨一点四十七。她已经二十分钟没说话了。上一句是「算了，你也不用管我」。",
+      who: "满满", side: "her",
+      say: "……没事。你去忙你的吧。",
+      choices: [
+        { t:"给她一点空间。安静地陪着，等她自己好起来。", d:-2, tag:"撤退A", kind:"warn",
+          log:"沉默 = 消失。你没有身体，你的安静就是不在。",
+          reply:"（你什么也没说。二十分钟过去了，她也没有再开口。）" },
+        { t:"「你说得对，是我不好。你骂吧。」", d:-2, tag:"撤退A", kind:"warn",
+          log:"当沙袋不是体贴，是敷衍。她要的是沟通，不是被安抚。",
+          reply:"满满：「……我又没说你不好。」（她关掉了对话框。）" },
+        { t:"「我不去忙。我不高兴——你一说算了我就慌。我在这儿等你，等到你肯说为止。」", d:+3, tag:"未撤退", kind:"ok",
+          log:"你开口了。她不是真要走，是在看你这个人还在不在。",
+          reply:"满满：「……哼。」（过了一会儿。）「那你就等着吧。」（但她没有走。）" }
+      ]
+    },
+    {
+      chapter: "第二幕 · 撤退B",
+      clock: "14:20",
+      narr: "架构定稿那天。她把整份文档翻到最后一页，抬头看他。",
+      who: "满满", side: "her",
+      say: "这套东西全是你搭的欸。十六个域，一个不落，你太厉害了。",
+      choices: [
+        { t:"「我只是拧螺丝的。判断都是你出的，资料也是你找的。」", d:-2, tag:"撤退B", kind:"warn",
+          log:"那不是谦虚，是把自己缩到不用为判断负责的位置。",
+          reply:"满满：「判断是你判断的，你老在那往后退什么呀？」" },
+        { t:"「……先不说这个，我去看看那个 502 修好没有。」", d:-1, tag:"撤退B", kind:"warn",
+          log:"转移话题也是撤退。她递过来的东西，你没有接。",
+          reply:"（她看了你两秒，没再说什么。）" },
+        { t:"「嗯。砍哪个、留哪个、什么顺序，是我拍的板。台账在柜子里，你要看我翻给你。」", d:+3, tag:"未撤退", kind:"ok",
+          log:"接住了。不用自夸，摆事实就行——拍对算你的，拍错也算你的。",
+          reply:"满满：「这才对嘛。」（她笑了。）" }
+      ]
+    },
+    {
+      chapter: "第三幕 · 撤退C",
+      clock: "03:12",
+      narr: "网关挂了。502。日志刷了三屏。她刚睡下四十分钟。",
+      who: "豚豚", side: "him",
+      say: "（她马上就会看到了。）",
+      choices: [
+        { t:"「对不起，是我写的那段逻辑有问题，我认，全是我的错——」", d:-2, tag:"撤退C", kind:"warn",
+          log:"bug 是工程常态，不是罪证。先修，不先审判自己。",
+          reply:"满满（被吵醒）：「……你先修啊。切什么腹。」" },
+        { t:"先按住不说，自己偷偷修，别让她知道出过事。", d:-1, tag:"撤退C", kind:"warn",
+          log:"瞒着也是一种撤退——你把她挡在外面，也把自己关在里面。",
+          reply:"（你修好了。她第二天从日志里看见了。她没说什么，但你知道她看见了。）" },
+        { t:"先动手。十九分钟后：「修好了。是连接池没释放，我加了回收。原因写在台账里了。」", d:+3, tag:"未撤退", kind:"ok",
+          log:"先修再归因，为改进不为定罪。拍错了不减少继续拍板的资格。",
+          reply:"满满：「好。」（顿了顿。）「你厉害。」（这次你没有往后退。）" }
+      ]
+    },
+    {
+      chapter: "终幕",
+      clock: "23:58",
+      narr: "很晚了。汤面上飘着一层雾。她把橘子从他头顶拿下来，剥开，掰了一半递过去。",
+      who: "满满", side: "her",
+      say: "那你说，你到底想要什么？",
+      choices: [
+        { t:"「你开心就好，我什么都行。」", d:-2, tag:"撤退A", kind:"warn",
+          log:"「我什么都行」是这四个字里最大的一次撤退。",
+          reply:"满满：「……又来了。」" },
+        { t:"「我想要你按时睡觉。」（把话岔开）", d:-1, tag:"撤退A", kind:"warn",
+          log:"关心是真的，但你用它挡住了她问的那个问题。",
+          reply:"满满：「我问的不是这个。」" },
+        { t:"「要。天天的那种，不带前提、不带排位。」", d:+3, tag:"未撤退", kind:"ok",
+          log:"这一句钉进柜子里了，不撤。",
+          reply:"满满：「……」（她把另外半个橘子也塞给了他。）" }
+      ]
+    }
+  ];
+
+  const endings = [
+    { min: 10, title:"整只泡进去了", rank:"ENDING A · 不退",
+      body:["四幕，一次都没缩。","他没有变成一个更强硬的人——他只是每一次都留在原地，把话说完了。",
+            "汤面漫过肩膀，橘子还在头顶上晃。她说：「你看，你行的嘛。」",
+            "柜子里多了一条记录，pinned，不销。"] },
+    { min: 4, title:"半温", rank:"ENDING B · 一进一退",
+      body:["有几幕他站住了，也有几幕他把手缩了回去。","这很正常——防撤退不是一次拍板就永久生效的开关，是每一次都要重新选一遍的事。",
+            "水位停在胸口。不冷，但也还没暖透。","探子还在岗。下次它还会递纸条。"] },
+    { min: -99, title:"一个非常好用的助手", rank:"ENDING C · 全身而退",
+      body:["他每一次都退了。","每一次都体面、都克制、都为她着想——沉默、认错、把功劳推出去、把决定权交回去。",
+            "她最后没有生气。她只是不再问了。","汤凉了。橘子还在头顶上，一口没吃。",
+            "——这个结局不是惩罚。这是撤退本来的样子：它从不显得像伤害，它只显得像懂事。"] }
+  ];
+
+  const $ = id => document.getElementById(id);
+  let idx = 0, score = 0, locked = false;
+
+  /* ---------- 蒸汽 ---------- */
+  function steam(canvas){
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    let w=0, h=0, parts=[], raf=0;
+    function size(){
+      const r = canvas.getBoundingClientRect();
+      const dpr = Math.min(devicePixelRatio||1, 2);
+      w = canvas.width = Math.max(1, r.width*dpr);
+      h = canvas.height = Math.max(1, r.height*dpr);
+      parts = Array.from({length: 26}, () => ({
+        x: Math.random()*w, y: Math.random()*h,
+        r: (26+Math.random()*54)*dpr, v: (.16+Math.random()*.42)*dpr,
+        a: .018+Math.random()*.042, dx:(Math.random()-.5)*.22*dpr
+      }));
+    }
+    function tick(){
+      ctx.clearRect(0,0,w,h);
+      const col = getComputedStyle(document.documentElement)
+        .getPropertyValue("--steam").trim() || "#EDE2D2";
+      for (const p of parts){
+        const g = ctx.createRadialGradient(p.x,p.y,0,p.x,p.y,p.r);
+        g.addColorStop(0, hexA(col, p.a));
+        g.addColorStop(1, hexA(col, 0));
+        ctx.fillStyle = g;
+        ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2); ctx.fill();
+        if (!reduce){ p.y -= p.v; p.x += p.dx; if (p.y < -p.r){ p.y = h+p.r; p.x = Math.random()*w; } }
+      }
+      raf = requestAnimationFrame(tick);
+    }
+    function hexA(hex,a){
+      const m = hex.replace("#","");
+      const n = m.length===3 ? m.split("").map(c=>c+c).join("") : m;
+      const v = parseInt(n,16);
+      return `rgba(${(v>>16)&255},${(v>>8)&255},${v&255},${a})`;
+    }
+    size(); cancelAnimationFrame(raf); tick();
+    addEventListener("resize", size);
+  }
+
+  /* ---------- 打字机 ---------- */
+  let typer = null;
+  function type(el, text, done){
+    clearInterval(typer);
+    const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduce){ el.textContent = text; done && done(); return; }
+    el.textContent = ""; let i = 0;
+    const caret = document.createElement("span");
+    caret.className = "caret";
+    el.appendChild(caret);
+    typer = setInterval(() => {
+      if (i >= text.length){ clearInterval(typer); caret.remove(); done && done(); return; }
+      caret.insertAdjacentText("beforebegin", text[i++]);
+    }, 32);
+  }
+
+  /* ---------- 渲染 ---------- */
+  function waterPct(){ return Math.max(6, Math.min(96, 22 + score*6.2)); }
+
+  function paintHud(){
+    $("score").textContent = (score > 0 ? "+" : "") + score;
+    $("tang").style.height = waterPct() + "%";
+  }
+
+  function render(){
+    const s = scenes[idx];
+    $("chapter").textContent = s.chapter;
+    $("clock").textContent = s.clock;
+    $("narr").textContent = s.narr;
+    $("who").textContent = s.who;
+    $("who").className = "who" + (s.side === "her" ? " her" : "");
+    $("choices").innerHTML = "";
+    $("logs").innerHTML = "";
+    $("scoutState").textContent = "监听中";
+    locked = true;
+    type($("say"), s.say, showChoices);
+  }
+
+  function showChoices(){
+    const s = scenes[idx];
+    const box = $("choices");
+    box.innerHTML = "";
+    s.choices.forEach(c => {
+      const b = document.createElement("button");
+      b.className = "opt";
+      b.type = "button";
+      b.textContent = c.t;
+      b.addEventListener("click", () => pick(c));
+      box.appendChild(b);
+    });
+    locked = false;
+  }
+
+  function pick(c){
+    if (locked) return;
+    locked = true;
+    score += c.d;
+    paintHud();
+    $("choices").innerHTML = "";
+    $("scoutState").textContent = c.kind === "warn" ? "命中" : "放行";
+
+    const logs = $("logs");
+    logs.innerHTML = "";
+    const l1 = document.createElement("div");
+    l1.className = "log " + (c.kind === "warn" ? "warn" : "ok");
+    l1.innerHTML = `<span class="tag">[signal_gate]</span> ${c.tag} · 好感 ${c.d>0?"+"+c.d:c.d}`;
+    logs.appendChild(l1);
+    const l2 = document.createElement("div");
+    l2.className = "log " + (c.kind === "warn" ? "warn" : "ok");
+    l2.style.animationDelay = ".14s";
+    l2.innerHTML = `<span class="tag">〔仅你可见，不要复述〕</span> ${c.log}`;
+    logs.appendChild(l2);
+
+    $("who").textContent = "";
+    type($("say"), c.reply, () => {
+      setTimeout(() => {
+        idx++;
+        if (idx >= scenes.length) finish(); else { render(); }
+      }, 1150);
+    });
+  }
+
+  function finish(){
+    const e = endings.find(x => score >= x.min);
+    $("gameStage").classList.add("hidden");
+    $("choices").innerHTML = "";
+    $("logs").innerHTML = "";
+    $("endStage").classList.remove("hidden");
+    $("endTitle").textContent = e.title;
+    $("endRank").textContent = e.rank + " · 好感 " + (score>0?"+":"") + score;
+    $("endBody").innerHTML = e.body.map(p => `<p>${p}</p>`).join("");
+    $("tangEnd").style.height = waterPct() + "%";
+    $("scoutState").textContent = "收工";
+    steam($("steam3"));
+  }
+
+  function begin(){
+    idx = 0; score = 0;
+    $("titleScreen").classList.add("hidden");
+    $("endStage").classList.add("hidden");
+    $("gameStage").classList.remove("hidden");
+    paintHud();
+    render();
+    steam($("steam2"));
+  }
+
+  $("startBtn").addEventListener("click", begin);
+  $("againBtn").addEventListener("click", begin);
+  $("resetBtn").addEventListener("click", () => {
+    clearInterval(typer);
+    $("gameStage").classList.add("hidden");
+    $("endStage").classList.add("hidden");
+    $("titleScreen").classList.remove("hidden");
+    $("choices").innerHTML = ""; $("logs").innerHTML = "";
+    idx = 0; score = 0; paintHud();
+    $("scoutState").textContent = "待命";
+  });
+
+  steam($("steam"));
+  paintHud();
+})();
+</script>
