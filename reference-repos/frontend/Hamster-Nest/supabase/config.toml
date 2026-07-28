@@ -1,0 +1,76 @@
+# Supabase project configuration for Hamster-Nest.
+#
+# These functions currently use handler-level authentication because the same
+# deployment contains user-JWT calls, service-to-service API-key calls, and
+# custom signed/shared-secret callbacks. New Supabase API keys are sent through
+# the apikey header and are not JWTs, so mixed-mode endpoints must reach the
+# handler before their specific credential can be checked.
+#
+# Functions that need user identity (memory-extract, openrouter-chat,
+# openrouter-models and shared verifyAuth callers) re-verify the JWT by calling
+# `/auth/v1/user` with the caller's Authorization/apikey headers and return
+# 401 on failure, so this is not a security regression for them.
+#
+# Machine-only Functions use dedicated shared-secret headers. Functions that
+# need privileged database access read the named edge_functions_20260715 key
+# from SUPABASE_SECRET_KEYS; the legacy service-role Bearer token is not an
+# accepted request credential.
+project_id = "crfhiumxzmaszkapanrb"
+
+[functions.hamster-mcp]
+verify_jwt = false
+
+[functions.hamster-print-mcp]
+verify_jwt = false
+
+[functions.memory-extract]
+verify_jwt = false
+
+[functions.openrouter-chat]
+verify_jwt = false
+
+[functions.openrouter-models]
+verify_jwt = false
+
+[functions.signal-bus-consumer]
+verify_jwt = false
+
+[functions.hamster-reading-mcp]
+verify_jwt = false
+
+[functions.hamster-life-mcp]
+verify_jwt = false
+
+[functions.hamster-knowledge-mcp]
+verify_jwt = false
+
+[functions.hamster-lounge-mcp]
+verify_jwt = false
+
+[functions.letter-generate]
+verify_jwt = false
+
+[functions.letter-check]
+verify_jwt = false
+
+[functions.wechat-reply]
+verify_jwt = false
+
+[functions.tts-generate]
+verify_jwt = false
+
+[functions.device-report]
+verify_jwt = false
+
+[functions.push-dispatch]
+verify_jwt = false
+
+[functions.conversation-dispatch]
+verify_jwt = false
+import_map = "./functions/conversation-dispatch/deno.json"
+entrypoint = "./functions/conversation-dispatch/index.ts"
+
+[functions.runtime-control]
+verify_jwt = true
+import_map = "./functions/runtime-control/deno.json"
+entrypoint = "./functions/runtime-control/index.ts"

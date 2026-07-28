@@ -1,0 +1,4010 @@
+import type {
+  Archive,
+  ArchiveCategory,
+  ArchiveImportance,
+  ArchiveScope,
+  BubbleMessage,
+  BubbleSession,
+  ChatMessage,
+  ChatSession,
+  AgentCouncilMessage,
+  AgentCouncilSpeaker,
+  AgentCouncilEntryType,
+  AgentCouncilProposalStatus,
+  AgentCouncilVote,
+  AgentCouncilMetadata,
+  AgentCouncilCategory,
+  AgentCouncilExecutor,
+  AgentCouncilReportResult,
+  CouncilCategorySlot,
+  CheckinEntry,
+  ForumAiProfile,
+  ForumReply,
+  ForumThread,
+  ForumAuthorType,
+  LetterEntry,
+  LetterTriggerType,
+  MemoEntry,
+  MemoSource,
+  MemoTag,
+  MemoryEntry,
+  MemoryStatus,
+  RpNpcCard,
+  RpMessage,
+  RpSession,
+  RpSessionGroup,
+  RpStoryGroup,
+  SnackPost,
+  SnackReply,
+  SyzygyPost,
+  SyzygyReply,
+  TimelineEntry,
+  TimelineRecorder,
+  TimelineSource,
+  TodoCategory,
+  TodoCreatedBy,
+  TodoItem,
+  TodoStatus,
+  TodoType,
+  WalletBalance,
+  WalletQuest,
+  WalletQuestCreator,
+  WalletQuestStatus,
+  WalletTransaction,
+  WalletTransactionType,
+  WikiEntry,
+  WikiEntryStatus,
+  NovelBook,
+  NovelChapter,
+  NovelCharacterCard,
+} from '../types'
+import { supabase } from '../supabase/client'
+import type { Json } from '../supabase/database.types'
+
+const FORUM_USER_AUTHOR_NAME = '串串'
+
+type SessionRow = {
+  id: string
+  user_id: string
+  title: string
+  created_at: string
+  updated_at: string
+  override_model: string | null
+  override_reasoning: boolean | null
+  is_archived: boolean | null
+  archived_at: string | null
+}
+
+type MessageRow = {
+  id: string
+  session_id: string
+  user_id: string
+  role: string
+  content: string
+  created_at: string
+  client_id: string | null
+  client_created_at: string | null
+  meta: Json | null
+}
+
+
+type SnackPostRow = {
+  id: string
+  user_id: string
+  content: string
+  created_at: string
+  updated_at: string
+  is_deleted: boolean
+}
+
+type SnackReplyRow = {
+  id: string
+  user_id: string
+  post_id: string
+  role: SnackReply['role']
+  content: string
+  meta: SnackReply['meta'] | null
+  created_at: string
+  is_deleted: boolean
+}
+
+
+type SyzygyPostRow = {
+  id: string
+  user_id: string
+  content: string
+  model_id: string | null
+  created_at: string
+  updated_at: string
+  is_deleted: boolean
+}
+
+type SyzygyReplyRow = {
+  id: string
+  user_id: string
+  post_id: string
+  author_role: SyzygyReply['authorRole']
+  content: string
+  model_id: string | null
+  created_at: string
+  is_deleted: boolean
+}
+
+type MemoryEntryRow = {
+  id: string
+  user_id: string
+  content: string
+  source: string
+  status: MemoryStatus
+  created_at: string
+  updated_at: string
+  is_deleted: boolean
+}
+
+type MemoEntryRow = {
+  id: string
+  user_id: string
+  content: string
+  source: MemoSource
+  is_pinned: boolean | null
+  created_at: string
+  updated_at: string
+}
+
+type MemoTagRow = {
+  id: string
+  user_id: string
+  name: string
+  created_at: string
+}
+
+type MemoEntryTagRow = {
+  memo_entry_id: string
+  memo_tag_id: string
+}
+
+type TimelineEntryRow = {
+  id: string
+  user_id: string
+  event_date: string
+  summary: string
+  recorder: TimelineRecorder
+  source: string
+  created_at: string
+  updated_at: string
+}
+
+type TodoCategoryRow = {
+  id: string
+  user_id: string
+  date: string
+  name: string
+  sort_order: number | null
+  created_at: string
+}
+
+type TodoItemRow = {
+  id: string
+  user_id: string
+  category_id: string
+  date: string
+  title: string
+  notes: string | null
+  status: TodoStatus
+  todo_type: TodoType | null
+  event_date: string | null
+  created_by: TodoCreatedBy | 'chuan'
+  sort_order: number | null
+  created_at: string
+  completed_at: string | null
+}
+
+type WikiEntryRow = {
+  id: string
+  user_id: string
+  title: string
+  content: string
+  category: string
+  tags: string[] | null
+  status: WikiEntryStatus
+  created_at: string
+  updated_at: string
+}
+
+type CheckinRow = {
+  id: string
+  user_id: string
+  checkin_date: string
+  created_at: string
+}
+
+type WalletQuestRow = {
+  id: string
+  user_id: string
+  created_by: WalletQuestCreator
+  title: string
+  description: string | null
+  reward_points: number
+  status: WalletQuestStatus
+  completed_at: string | null
+  completed_note: string | null
+  created_at: string
+}
+
+type WalletTransactionRow = {
+  id: string
+  type: WalletTransactionType
+  points_delta: number | null
+  coins_delta: number | null
+  description: string | null
+  quest_id: string | null
+  created_at: string
+}
+
+type WalletBalanceRow = {
+  points: number | null
+  coins: number | null
+}
+
+type RpSessionRow = {
+  id: string
+  user_id: string
+  title: string
+  tile_color: string | null
+  created_at: string
+  updated_at: string | null
+  is_archived: boolean | null
+  archived_at: string | null
+  player_display_name: string | null
+  player_avatar_url: string | null
+  worldbook_text: string | null
+  rp_context_token_limit: number | null
+  rp_keep_recent_messages: number | null
+  settings: Record<string, unknown> | null
+}
+
+type RpMessageRow = {
+  id: string
+  session_id: string
+  user_id: string
+  role: string
+  content: string
+  created_at: string
+  client_id: string | null
+  client_created_at: string | null
+  meta: Record<string, unknown> | null
+}
+
+type RpNpcCardRow = {
+  id: string
+  session_id: string
+  user_id: string
+  display_name: string
+  system_prompt: string | null
+  model_config: Record<string, unknown> | null
+  api_config: Record<string, unknown> | null
+  enabled: boolean | null
+  created_at: string
+  updated_at: string | null
+}
+
+type ForumThreadRow = {
+  id: string
+  user_id: string
+  title: string
+  body: string
+  author_type: ForumAuthorType
+  author_slot: number | null
+  author_name: string | null
+  created_at: string
+  updated_at: string
+}
+
+type ForumReplyRow = {
+  id: string
+  thread_id: string
+  user_id: string
+  body: string
+  author_type: ForumAuthorType
+  author_slot: number | null
+  author_name: string | null
+  parent_id: string | null
+  reply_to_reply_id: string | null
+  reply_to_author_name: string | null
+  depth?: number | null
+  sort_path?: string | null
+  created_at: string
+}
+
+type ForumAiProfileRow = {
+  id: string
+  user_id: string
+  slot_index: number
+  enabled: boolean | null
+  name: string | null
+  system_prompt: string | null
+  model: string | null
+  temperature: number | null
+  top_p: number | null
+  api_base_url: string | null
+  context_token_limit: number | null
+  created_at: string
+  updated_at: string
+}
+
+type LetterRow = {
+  id: string
+  user_id: string
+  model: string
+  content: string
+  trigger_type: LetterTriggerType
+  trigger_reason: string | null
+  created_at: string
+  is_read: boolean | null
+  conversation_id: string | null
+  module: string | null
+  metadata: Record<string, unknown> | null
+}
+
+type LetterConversationRow = {
+  letter_id: string
+  conversation_id: string
+}
+
+type AgentCouncilRow = {
+  id: string
+  speaker: AgentCouncilSpeaker
+  topic: string
+  message: string
+  created_at: string
+  updated_at: string | null
+  parent_id: string | null
+  entry_type: string | null
+  proposal_status: string | null
+  vote: string | null
+  category: string | null
+  executor: string | null
+  metadata: Record<string, unknown> | null
+}
+
+
+const mapSnackPostRow = (row: SnackPostRow): SnackPost => ({
+  id: row.id,
+  userId: row.user_id,
+  content: row.content,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+  isDeleted: row.is_deleted,
+})
+
+const mapSnackReplyRow = (row: SnackReplyRow): SnackReply => ({
+  id: row.id,
+  userId: row.user_id,
+  postId: row.post_id,
+  role: row.role,
+  content: row.content,
+  createdAt: row.created_at,
+  isDeleted: row.is_deleted,
+  meta: row.meta ?? undefined,
+})
+
+
+const mapSyzygyPostRow = (row: SyzygyPostRow): SyzygyPost => ({
+  id: row.id,
+  userId: row.user_id,
+  content: row.content,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+  isDeleted: row.is_deleted,
+  modelId: row.model_id ?? null,
+})
+
+const mapSyzygyReplyRow = (row: SyzygyReplyRow): SyzygyReply => ({
+  id: row.id,
+  userId: row.user_id,
+  postId: row.post_id,
+  authorRole: row.author_role,
+  content: row.content,
+  createdAt: row.created_at,
+  isDeleted: row.is_deleted,
+  modelId: row.model_id ?? null,
+})
+
+const AGENT_COUNCIL_ENTRY_TYPES: AgentCouncilEntryType[] = ['proposal', 'review', 'decision', 'report']
+const AGENT_COUNCIL_PROPOSAL_STATUSES: AgentCouncilProposalStatus[] = [
+  'open',
+  'approved',
+  'rejected',
+  'deferred',
+  'plan_generated',
+  'done',
+  'failed',
+]
+const AGENT_COUNCIL_VOTES: AgentCouncilVote[] = ['support', 'neutral', 'against']
+const AGENT_COUNCIL_EXECUTORS: AgentCouncilExecutor[] = [
+  'codex_cli',
+  'claude_code_cli',
+  'client',
+  'chuanchuan',
+]
+
+const AGENT_COUNCIL_SELECT_FIELDS =
+  'id,speaker,topic,message,created_at,updated_at,parent_id,entry_type,proposal_status,vote,category,executor,metadata'
+
+// 旧数据的 entry_type / proposal_status / vote 可能为空或不在白名单内，统一归一化为 null，避免前端崩溃。
+const normalizeAgentCouncilEnum = <T extends string>(value: string | null, allowed: T[]): T | null =>
+  value && (allowed as string[]).includes(value) ? (value as T) : null
+
+const mapAgentCouncilRow = (row: AgentCouncilRow): AgentCouncilMessage => ({
+  id: row.id,
+  speaker: row.speaker,
+  topic: row.topic,
+  message: row.message,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at ?? null,
+  parentId: row.parent_id ?? null,
+  entryType: normalizeAgentCouncilEnum(row.entry_type, AGENT_COUNCIL_ENTRY_TYPES),
+  proposalStatus: normalizeAgentCouncilEnum(row.proposal_status, AGENT_COUNCIL_PROPOSAL_STATUSES),
+  vote: normalizeAgentCouncilEnum(row.vote, AGENT_COUNCIL_VOTES),
+  // category 值域由工具层演进，前端不做白名单过滤，原样展示未知分类。
+  category: row.category ?? null,
+  executor: normalizeAgentCouncilEnum(row.executor, AGENT_COUNCIL_EXECUTORS),
+  metadata: (row.metadata ?? {}) as AgentCouncilMetadata,
+})
+
+const mapMemoryEntryRow = (row: MemoryEntryRow): MemoryEntry => ({
+  id: row.id,
+  userId: row.user_id,
+  content: row.content,
+  source: row.source,
+  status: row.status,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+  isDeleted: row.is_deleted,
+})
+
+const mapCheckinRow = (row: CheckinRow): CheckinEntry => ({
+  id: row.id,
+  userId: row.user_id,
+  checkinDate: row.checkin_date,
+  createdAt: row.created_at,
+})
+
+const mapWalletQuestRow = (row: WalletQuestRow): WalletQuest => ({
+  id: row.id,
+  userId: row.user_id,
+  createdBy: row.created_by,
+  title: row.title,
+  description: row.description ?? '',
+  rewardPoints: row.reward_points,
+  status: row.status,
+  completedAt: row.completed_at,
+  completedNote: row.completed_note,
+  createdAt: row.created_at,
+})
+
+const mapWalletTransactionRow = (row: WalletTransactionRow): WalletTransaction => ({
+  id: row.id,
+  type: row.type,
+  pointsDelta: row.points_delta ?? 0,
+  coinsDelta: Number(row.coins_delta ?? 0),
+  description: row.description ?? '',
+  questId: row.quest_id,
+  createdAt: row.created_at,
+})
+
+const mapWalletBalanceRow = (row: WalletBalanceRow): WalletBalance => ({
+  points: row.points ?? 0,
+  coins: Number(row.coins ?? 0),
+})
+
+const mapMemoEntryRow = (row: MemoEntryRow, tagIds: string[]): MemoEntry => ({
+  id: row.id,
+  userId: row.user_id,
+  content: row.content,
+  source: row.source,
+  isPinned: row.is_pinned ?? false,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+  tagIds,
+})
+
+const mapMemoTagRow = (row: MemoTagRow): MemoTag => ({
+  id: row.id,
+  userId: row.user_id,
+  name: row.name,
+  createdAt: row.created_at,
+})
+
+const mapTimelineEntryRow = (row: TimelineEntryRow): TimelineEntry => ({
+  id: row.id,
+  userId: row.user_id,
+  eventDate: row.event_date,
+  summary: row.summary,
+  recorder: row.recorder,
+  source: row.source,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+})
+
+const mapTodoCategoryRow = (row: TodoCategoryRow): TodoCategory => ({
+  id: row.id,
+  userId: row.user_id,
+  date: row.date,
+  name: row.name,
+  sortOrder: row.sort_order ?? 0,
+  createdAt: row.created_at,
+})
+
+const normalizeTodoCreatedBy = (createdBy: TodoItemRow['created_by']): TodoCreatedBy => (
+  createdBy === 'chuan' ? '串串' : createdBy
+)
+
+const mapTodoItemRow = (row: TodoItemRow): TodoItem => ({
+  id: row.id,
+  userId: row.user_id,
+  categoryId: row.category_id,
+  date: row.date,
+  title: row.title,
+  notes: row.notes,
+  status: row.status,
+  // 旧数据 todo_type 可能为空，前端统一按 short_term（近期）处理。
+  todoType: row.todo_type === 'long_term' ? 'long_term' : 'short_term',
+  eventDate: row.event_date,
+  createdBy: normalizeTodoCreatedBy(row.created_by),
+  sortOrder: row.sort_order ?? 0,
+  createdAt: row.created_at,
+  completedAt: row.completed_at,
+})
+
+const mapWikiEntryRow = (row: WikiEntryRow): WikiEntry => ({
+  id: row.id,
+  userId: row.user_id,
+  title: row.title,
+  content: row.content,
+  category: row.category,
+  tags: row.tags ?? [],
+  status: row.status,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+})
+
+const mapRpSessionRow = (row: RpSessionRow): RpSession => ({
+  id: row.id,
+  userId: row.user_id,
+  title: row.title,
+  tileColor: row.tile_color ?? null,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+  isArchived: row.is_archived ?? false,
+  archivedAt: row.archived_at,
+  playerDisplayName: row.player_display_name,
+  playerAvatarUrl: row.player_avatar_url,
+  worldbookText: row.worldbook_text,
+  rpContextTokenLimit: row.rp_context_token_limit,
+  rpKeepRecentMessages: row.rp_keep_recent_messages,
+  settings: row.settings ?? {},
+})
+
+const RP_SESSION_SELECT_FIELDS =
+  'id,user_id,title,tile_color,created_at,updated_at,is_archived,archived_at,player_display_name,player_avatar_url,worldbook_text,rp_context_token_limit,rp_keep_recent_messages,settings'
+
+const RP_SESSION_SELECT_FIELDS_LEGACY =
+  'id,user_id,title,created_at,updated_at,is_archived,archived_at,player_display_name,player_avatar_url,worldbook_text,rp_context_token_limit,rp_keep_recent_messages,settings'
+
+const isMissingTileColorColumnError = (error: unknown) => {
+  if (!error || typeof error !== 'object') {
+    return false
+  }
+  const candidate = error as { code?: unknown; message?: unknown }
+  const message = typeof candidate.message === 'string' ? candidate.message.toLowerCase() : ''
+  return candidate.code === '42703' || message.includes('tile_color')
+}
+
+const mapRpMessageRow = (row: RpMessageRow): RpMessage => ({
+  id: row.id,
+  sessionId: row.session_id,
+  userId: row.user_id,
+  role: row.role,
+  content: row.content,
+  createdAt: row.created_at,
+  clientId: row.client_id,
+  clientCreatedAt: row.client_created_at,
+  meta: row.meta ?? undefined,
+})
+
+const RP_NPC_CARD_SELECT_FIELDS =
+  'id,session_id,user_id,display_name,system_prompt,model_config,api_config,enabled,created_at,updated_at'
+
+const mapRpNpcCardRow = (row: RpNpcCardRow): RpNpcCard => ({
+  id: row.id,
+  sessionId: row.session_id,
+  userId: row.user_id,
+  displayName: row.display_name,
+  systemPrompt: row.system_prompt ?? '',
+  modelConfig: row.model_config ?? {},
+  apiConfig: row.api_config ?? {},
+  enabled: row.enabled ?? false,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+})
+
+const mapForumThreadRow = (row: ForumThreadRow): ForumThread => ({
+  id: row.id,
+  userId: row.user_id,
+  title: row.title,
+  content: row.body,
+  authorType: row.author_type,
+  authorSlot: row.author_slot,
+  authorName: row.author_name,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+})
+
+const mapForumReplyRow = (row: ForumReplyRow): ForumReply => {
+  const canonicalParentId = row.parent_id ?? row.reply_to_reply_id
+
+  return {
+    id: row.id,
+    threadId: row.thread_id,
+    userId: row.user_id,
+    content: row.body,
+    authorType: row.author_type,
+    authorSlot: row.author_slot,
+    authorName: row.author_name,
+    parentId: canonicalParentId,
+    depth: row.depth ?? undefined,
+    sortPath: row.sort_path ?? undefined,
+    replyToType: canonicalParentId ? 'reply' : 'thread',
+    replyToReplyId: row.reply_to_reply_id ?? canonicalParentId,
+    replyToAuthorName: row.reply_to_author_name,
+    createdAt: row.created_at,
+  }
+}
+
+const normalizeForumContextTokenLimit = (value: number | null | undefined) => {
+  if (!Number.isFinite(value)) {
+    return 32000
+  }
+  const rounded = Math.round(value as number)
+  return rounded >= 8000 && rounded <= 128000 ? rounded : 32000
+}
+
+const mapForumAiProfileRow = (row: ForumAiProfileRow): ForumAiProfile => ({
+  id: row.id,
+  userId: row.user_id,
+  slotIndex: row.slot_index,
+  enabled: row.enabled ?? true,
+  displayName: row.name ?? `AI Slot ${row.slot_index}`,
+  systemPrompt: row.system_prompt ?? '',
+  model: row.model ?? 'openrouter/auto',
+  temperature: row.temperature ?? 0.8,
+  topP: row.top_p ?? 0.9,
+  contextTokenLimit: normalizeForumContextTokenLimit(row.context_token_limit),
+  apiBaseUrl: row.api_base_url ?? '',
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+})
+
+const mapSessionRow = (row: SessionRow): ChatSession => ({
+  id: row.id,
+  title: row.title,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+  overrideModel: row.override_model ?? null,
+  overrideReasoning: row.override_reasoning ?? null,
+  isArchived: row.is_archived ?? false,
+  archivedAt: row.archived_at ?? null,
+})
+
+const mapLetterRow = (row: LetterRow): LetterEntry => ({
+  id: row.id,
+  userId: row.user_id,
+  model: row.model,
+  content: row.content,
+  triggerType: row.trigger_type,
+  triggerReason: row.trigger_reason,
+  createdAt: row.created_at,
+  isRead: row.is_read ?? false,
+  conversationId: row.conversation_id,
+  module: row.module,
+  metadata: row.metadata,
+})
+
+const mapMessageRow = (row: MessageRow): ChatMessage => ({
+  id: row.id,
+  sessionId: row.session_id,
+  role: row.role === 'assistant' ? 'assistant' : 'user',
+  content: row.content,
+  createdAt: row.created_at,
+  clientId: row.client_id ?? row.id,
+  clientCreatedAt: row.client_created_at,
+  meta:
+    row.meta && typeof row.meta === 'object' && !Array.isArray(row.meta)
+      ? (row.meta as ChatMessage['meta'])
+      : undefined,
+  pending: false,
+})
+
+const requireAuthenticatedUserId = async (): Promise<string> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const {
+    data: { user },
+    error,
+  } = await supabase.auth.getUser()
+  if (error) {
+    throw error
+  }
+  if (!user) {
+    throw new Error('登录状态异常，请重新登录')
+  }
+  return user.id
+}
+
+export const fetchLetters = async (): Promise<LetterEntry[]> => {
+  if (!supabase) {
+    return []
+  }
+  const userId = await requireAuthenticatedUserId()
+  const { data, error } = await supabase
+    .from('letters')
+    .select(
+      'id,user_id,model,content,trigger_type,trigger_reason,created_at,is_read,conversation_id,module,metadata',
+    )
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+  if (error) {
+    throw error
+  }
+  return (data ?? []).map((row) => mapLetterRow(row as LetterRow))
+}
+
+export const fetchLettersByConversation = async (sessionId: string): Promise<LetterEntry[]> => {
+  if (!supabase) {
+    return []
+  }
+  const userId = await requireAuthenticatedUserId()
+  const { data: links, error: linkError } = await supabase
+    .from('letter_conversations')
+    .select('letter_id,conversation_id')
+    .eq('conversation_id', sessionId)
+  if (linkError) {
+    throw linkError
+  }
+
+  const linkedLetterIds = Array.from(
+    new Set((links ?? []).map((row) => (row as LetterConversationRow).letter_id).filter(Boolean)),
+  )
+
+  let query = supabase
+    .from('letters')
+    .select(
+      'id,user_id,model,content,trigger_type,trigger_reason,created_at,is_read,conversation_id,module,metadata',
+    )
+    .eq('user_id', userId)
+    .order('created_at', { ascending: true })
+
+  if (linkedLetterIds.length > 0) {
+    query = query.in('id', linkedLetterIds)
+  } else {
+    query = query.eq('conversation_id', sessionId)
+  }
+
+  const { data, error } = await query
+  if (error) {
+    throw error
+  }
+  return (data ?? []).map((row) => mapLetterRow(row as LetterRow))
+}
+
+export const createLetter = async (
+  input: {
+    model: string
+    content: string
+    triggerType?: LetterTriggerType
+    triggerReason?: string | null
+    conversationId?: string | null
+    module?: string | null
+    metadata?: Record<string, unknown> | null
+    createdAt?: string
+    isRead?: boolean
+  },
+): Promise<LetterEntry> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const userId = await requireAuthenticatedUserId()
+  const { data, error } = await supabase
+    .from('letters')
+    .insert({
+      user_id: userId,
+      model: input.model,
+      content: input.content,
+      trigger_type: input.triggerType ?? 'manual',
+      trigger_reason: input.triggerReason ?? null,
+      created_at: input.createdAt ?? new Date().toISOString(),
+      is_read: input.isRead ?? false,
+      conversation_id: input.conversationId ?? null,
+      module: input.module ?? undefined,
+      metadata: (input.metadata as Json | null | undefined) ?? null,
+    })
+    .select(
+      'id,user_id,model,content,trigger_type,trigger_reason,created_at,is_read,conversation_id,module,metadata',
+    )
+    .single()
+  if (error || !data) {
+    throw error ?? new Error('创建信件失败')
+  }
+  const letter = mapLetterRow(data as LetterRow)
+  return letter
+}
+
+export const markLetterAsRead = async (letterId: string): Promise<void> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const userId = await requireAuthenticatedUserId()
+  const { error } = await supabase
+    .from('letters')
+    .update({ is_read: true })
+    .eq('id', letterId)
+    .eq('user_id', userId)
+  if (error) {
+    throw error
+  }
+}
+
+export const linkLetterToConversation = async (letterId: string, conversationId: string): Promise<void> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const userId = await requireAuthenticatedUserId()
+  const { error: linkError } = await supabase
+    .from('letter_conversations')
+    .upsert(
+      {
+        letter_id: letterId,
+        conversation_id: conversationId,
+      },
+      {
+        onConflict: 'letter_id,conversation_id',
+        ignoreDuplicates: true,
+      },
+    )
+  if (linkError) {
+    throw linkError
+  }
+
+  const { error: legacyError } = await supabase
+    .from('letters')
+    .update({ conversation_id: conversationId })
+    .eq('id', letterId)
+    .eq('user_id', userId)
+    .is('conversation_id', null)
+  if (legacyError) {
+    throw legacyError
+  }
+}
+
+export const deleteLetter = async (letterId: string): Promise<void> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const userId = await requireAuthenticatedUserId()
+  const { error } = await supabase
+    .from('letters')
+    .delete()
+    .eq('id', letterId)
+    .eq('user_id', userId)
+  if (error) {
+    throw error
+  }
+}
+
+export const fetchRemoteSessions = async (userId: string): Promise<ChatSession[]> => {
+  if (!supabase) {
+    return []
+  }
+  const { data, error } = await supabase
+    .from('sessions')
+    .select('id,user_id,title,created_at,updated_at,override_model,override_reasoning,is_archived,archived_at')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: true })
+  if (error) {
+    throw error
+  }
+  return (data ?? []).map(mapSessionRow)
+}
+
+export const fetchRemoteMessages = async (
+  userId: string,
+  sessionId?: string,
+): Promise<ChatMessage[]> => {
+  if (!supabase) {
+    return []
+  }
+  let query = supabase
+    .from('messages')
+    .select('id,session_id,user_id,role,content,created_at,client_id,client_created_at,meta')
+    .eq('user_id', userId)
+
+  if (sessionId) {
+    query = query.eq('session_id', sessionId)
+  }
+
+  const { data, error } = await query.order('created_at', { ascending: true })
+  if (error) {
+    throw error
+  }
+  return (data ?? []).map(mapMessageRow)
+}
+
+export const createRemoteSession = async (
+  userId: string,
+  title: string,
+): Promise<ChatSession> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const { data, error } = await supabase
+    .from('sessions')
+    .insert({
+      user_id: userId,
+      title,
+    })
+    .select('id,user_id,title,created_at,updated_at,override_model,override_reasoning,is_archived,archived_at')
+    .single()
+  if (error || !data) {
+    throw error ?? new Error('创建会话失败')
+  }
+  return mapSessionRow(data as SessionRow)
+}
+
+export const fetchRpSessions = async (userId: string, isArchived: boolean): Promise<RpSession[]> => {
+  if (!supabase) {
+    return []
+  }
+  const query = supabase
+    .from('rp_sessions')
+    .select(RP_SESSION_SELECT_FIELDS)
+    .eq('user_id', userId)
+    .eq('is_archived', isArchived)
+    .order('updated_at', { ascending: false, nullsFirst: false })
+    .order('created_at', { ascending: false })
+  const { data, error } = await query
+  if (error && isMissingTileColorColumnError(error)) {
+    const { data: legacyData, error: legacyError } = await supabase
+      .from('rp_sessions')
+      .select(RP_SESSION_SELECT_FIELDS_LEGACY)
+      .eq('user_id', userId)
+      .eq('is_archived', isArchived)
+      .order('updated_at', { ascending: false, nullsFirst: false })
+      .order('created_at', { ascending: false })
+
+    if (legacyError) {
+      throw legacyError
+    }
+
+    return (legacyData ?? []).map((row) => mapRpSessionRow({ ...(row as RpSessionRow), tile_color: null }))
+  }
+  if (error) {
+    throw error
+  }
+  return (data ?? []).map((row) => mapRpSessionRow(row as RpSessionRow))
+}
+
+export const updateRpSessionTileColor = async (
+  sessionId: string,
+  tileColor: string,
+  signal?: AbortSignal,
+): Promise<void> => {
+  if (!supabase) {
+    return
+  }
+  const userId = await requireAuthenticatedUserId()
+  const now = new Date().toISOString()
+  let query = supabase
+    .from('rp_sessions')
+    .update({ tile_color: tileColor, updated_at: now })
+    .eq('id', sessionId)
+    .eq('user_id', userId)
+
+  if (signal) {
+    query = query.abortSignal(signal)
+  }
+
+  const { error } = await query
+  if (error && !isMissingTileColorColumnError(error)) {
+    throw error
+  }
+}
+
+export const createRpSession = async (
+  userId: string,
+  title: string,
+): Promise<RpSession> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const now = new Date().toISOString()
+  const { data, error } = await supabase
+    .from('rp_sessions')
+    .insert({
+      user_id: userId,
+      title,
+      created_at: now,
+      updated_at: now,
+    })
+    .select(RP_SESSION_SELECT_FIELDS)
+    .single()
+  if (error || !data) {
+    throw error ?? new Error('创建 RP 房间失败')
+  }
+  return mapRpSessionRow(data as RpSessionRow)
+}
+
+export const fetchRpSessionById = async (sessionId: string, userId: string): Promise<RpSession | null> => {
+  if (!supabase) {
+    return null
+  }
+  const { data, error } = await supabase
+    .from('rp_sessions')
+    .select(RP_SESSION_SELECT_FIELDS)
+    .eq('id', sessionId)
+    .eq('user_id', userId)
+    .maybeSingle()
+  if (error) {
+    throw error
+  }
+  if (!data) {
+    return null
+  }
+  return mapRpSessionRow(data as RpSessionRow)
+}
+
+export const updateRpSessionArchiveState = async (
+  sessionId: string,
+  isArchived: boolean,
+): Promise<RpSession> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const userId = await requireAuthenticatedUserId()
+  const updates = isArchived
+    ? { is_archived: true, archived_at: new Date().toISOString() }
+    : { is_archived: false, archived_at: null }
+  const { data, error } = await supabase
+    .from('rp_sessions')
+    .update(updates)
+    .eq('id', sessionId)
+    .eq('user_id', userId)
+    .select(RP_SESSION_SELECT_FIELDS)
+    .single()
+  if (error || !data) {
+    throw error ?? new Error('更新 RP 房间归档状态失败')
+  }
+  return mapRpSessionRow(data as RpSessionRow)
+}
+
+export const renameRpSession = async (
+  sessionId: string,
+  title: string,
+): Promise<RpSession> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const userId = await requireAuthenticatedUserId()
+  const now = new Date().toISOString()
+  const { data, error } = await supabase
+    .from('rp_sessions')
+    .update({ title, updated_at: now })
+    .eq('id', sessionId)
+    .eq('user_id', userId)
+    .select(RP_SESSION_SELECT_FIELDS)
+    .single()
+  if (error || !data) {
+    throw error ?? new Error('更新 RP 房间名称失败')
+  }
+  return mapRpSessionRow(data as RpSessionRow)
+}
+
+export const deleteRpSession = async (sessionId: string): Promise<void> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const userId = await requireAuthenticatedUserId()
+  const { error } = await supabase
+    .from('rp_sessions')
+    .delete()
+    .eq('id', sessionId)
+    .eq('user_id', userId)
+  if (error) {
+    throw error
+  }
+}
+
+export const updateRpSessionDashboard = async (
+  sessionId: string,
+  updates: {
+    playerDisplayName?: string
+    playerAvatarUrl?: string
+    worldbookText?: string
+    settings?: Json
+    rpContextTokenLimit?: number
+    rpKeepRecentMessages?: number
+  },
+): Promise<RpSession> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const userId = await requireAuthenticatedUserId()
+  const nextUpdates: {
+    updated_at: string
+    player_display_name?: string
+    player_avatar_url?: string
+    worldbook_text?: string
+    settings?: Json
+    rp_context_token_limit?: number
+    rp_keep_recent_messages?: number
+  } = {
+    updated_at: new Date().toISOString(),
+  }
+
+  if (typeof updates.playerDisplayName !== 'undefined') {
+    nextUpdates.player_display_name = updates.playerDisplayName
+  }
+  if (typeof updates.playerAvatarUrl !== 'undefined') {
+    nextUpdates.player_avatar_url = updates.playerAvatarUrl
+  }
+  if (typeof updates.worldbookText !== 'undefined') {
+    nextUpdates.worldbook_text = updates.worldbookText
+  }
+  if (typeof updates.settings !== 'undefined') {
+    nextUpdates.settings = updates.settings as Json
+  }
+  if (typeof updates.rpContextTokenLimit !== 'undefined') {
+    nextUpdates.rp_context_token_limit = updates.rpContextTokenLimit
+  }
+  if (typeof updates.rpKeepRecentMessages !== 'undefined') {
+    nextUpdates.rp_keep_recent_messages = updates.rpKeepRecentMessages
+  }
+
+  const { data, error } = await supabase
+    .from('rp_sessions')
+    .update(nextUpdates)
+    .eq('id', sessionId)
+    .eq('user_id', userId)
+    .select(RP_SESSION_SELECT_FIELDS)
+    .single()
+
+  if (error || !data) {
+    throw error ?? new Error('更新 RP 仪表盘设置失败')
+  }
+
+  return mapRpSessionRow(data as RpSessionRow)
+}
+
+export const fetchRpMessages = async (sessionId: string, userId: string): Promise<RpMessage[]> => {
+  if (!supabase) {
+    return []
+  }
+  const { data, error } = await supabase
+    .from('rp_messages')
+    .select('id,session_id,user_id,role,content,created_at,client_id,client_created_at,meta')
+    .eq('session_id', sessionId)
+    .eq('user_id', userId)
+    .order('created_at', { ascending: true })
+  if (error) {
+    throw error
+  }
+  return (data ?? []).map((row) => mapRpMessageRow(row as RpMessageRow))
+}
+
+export const fetchRpMessageCounts = async (
+  userId: string,
+  sessionIds: string[],
+  signal?: AbortSignal,
+): Promise<Record<string, number>> => {
+  if (!supabase || sessionIds.length === 0) {
+    return {}
+  }
+
+  let query = supabase
+    .from('rp_messages')
+    .select('session_id')
+    .eq('user_id', userId)
+    .in('session_id', sessionIds)
+
+  if (signal) {
+    query = query.abortSignal(signal)
+  }
+
+  const { data, error } = await query
+
+  if (error) {
+    throw error
+  }
+
+  const counts = sessionIds.reduce<Record<string, number>>((accumulator, sessionId) => {
+    accumulator[sessionId] = 0
+    return accumulator
+  }, {})
+
+  const rows = (data ?? []) as Array<{ session_id: string }>
+  rows.forEach((row) => {
+    counts[row.session_id] = (counts[row.session_id] ?? 0) + 1
+  })
+
+  return counts
+}
+
+export const createRpMessage = async (
+  sessionId: string,
+  userId: string,
+  role: string,
+  content: string,
+  options?: {
+    createdAt?: string
+    meta?: Record<string, unknown>
+  },
+): Promise<RpMessage> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const now = options?.createdAt ?? new Date().toISOString()
+  const { data, error } = await supabase
+    .from('rp_messages')
+    .insert({
+      session_id: sessionId,
+      user_id: userId,
+      role,
+      content,
+      created_at: now,
+      meta: (options?.meta ?? {}) as Json,
+    })
+    .select('id,session_id,user_id,role,content,created_at,client_id,client_created_at,meta')
+    .single()
+  if (error || !data) {
+    throw error ?? new Error('发送 RP 消息失败')
+  }
+  return mapRpMessageRow(data as RpMessageRow)
+}
+
+export const deleteRpMessage = async (messageId: string): Promise<void> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const userId = await requireAuthenticatedUserId()
+  const { error } = await supabase
+    .from('rp_messages')
+    .delete()
+    .eq('id', messageId)
+    .eq('user_id', userId)
+  if (error) {
+    throw error
+  }
+}
+
+export const fetchRpNpcCards = async (sessionId: string, userId: string): Promise<RpNpcCard[]> => {
+  if (!supabase) {
+    return []
+  }
+  const { data, error } = await supabase
+    .from('rp_npc_cards')
+    .select(RP_NPC_CARD_SELECT_FIELDS)
+    .eq('session_id', sessionId)
+    .eq('user_id', userId)
+    .order('created_at', { ascending: true })
+  if (error) {
+    throw error
+  }
+  return (data ?? []).map((row) => mapRpNpcCardRow(row as RpNpcCardRow))
+}
+
+export const createRpNpcCard = async (
+  payload: {
+    sessionId: string
+    userId: string
+    displayName: string
+    systemPrompt?: string
+    modelConfig?: Record<string, unknown>
+    apiConfig?: Record<string, unknown>
+    enabled?: boolean
+  },
+): Promise<RpNpcCard> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const normalizedSystemPrompt = payload.systemPrompt ?? ''
+  const normalizedModelConfig = payload.modelConfig ?? {}
+  const normalizedApiConfig = payload.apiConfig ?? {}
+  const now = new Date().toISOString()
+  const { data, error } = await supabase
+    .from('rp_npc_cards')
+    .insert({
+      session_id: payload.sessionId,
+      user_id: payload.userId,
+      display_name: payload.displayName,
+      system_prompt: normalizedSystemPrompt,
+      model_config: normalizedModelConfig as Json,
+      api_config: normalizedApiConfig as Json,
+      enabled: payload.enabled ?? false,
+      created_at: now,
+      updated_at: now,
+    })
+    .select(RP_NPC_CARD_SELECT_FIELDS)
+    .single()
+  if (error || !data) {
+    throw error ?? new Error('创建 NPC 角色卡失败')
+  }
+  return mapRpNpcCardRow(data as RpNpcCardRow)
+}
+
+export const updateRpNpcCard = async (
+  npcCardId: string,
+  updates: {
+    displayName?: string
+    systemPrompt?: string
+    modelConfig?: Record<string, unknown>
+    apiConfig?: Record<string, unknown>
+    enabled?: boolean
+  },
+): Promise<RpNpcCard> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const userId = await requireAuthenticatedUserId()
+  const nextUpdates: {
+    updated_at: string
+    display_name?: string
+    system_prompt?: string
+    model_config?: Json
+    api_config?: Json
+    enabled?: boolean
+  } = {
+    updated_at: new Date().toISOString(),
+  }
+  if (typeof updates.displayName !== 'undefined') {
+    nextUpdates.display_name = updates.displayName
+  }
+  if (typeof updates.systemPrompt !== 'undefined') {
+    nextUpdates.system_prompt = updates.systemPrompt ?? ''
+  }
+  if (typeof updates.modelConfig !== 'undefined') {
+    nextUpdates.model_config = (updates.modelConfig ?? {}) as Json
+  }
+  if (typeof updates.apiConfig !== 'undefined') {
+    nextUpdates.api_config = (updates.apiConfig ?? {}) as Json
+  }
+  if (typeof updates.enabled !== 'undefined') {
+    nextUpdates.enabled = updates.enabled
+  }
+
+  const { data, error } = await supabase
+    .from('rp_npc_cards')
+    .update(nextUpdates)
+    .eq('id', npcCardId)
+    .eq('user_id', userId)
+    .select(RP_NPC_CARD_SELECT_FIELDS)
+    .single()
+
+  if (error || !data) {
+    throw error ?? new Error('更新 NPC 角色卡失败')
+  }
+  return mapRpNpcCardRow(data as RpNpcCardRow)
+}
+
+export const deleteRpNpcCard = async (npcCardId: string): Promise<void> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const userId = await requireAuthenticatedUserId()
+  const { error } = await supabase
+    .from('rp_npc_cards')
+    .delete()
+    .eq('id', npcCardId)
+    .eq('user_id', userId)
+  if (error) {
+    throw error
+  }
+}
+
+export const renameRemoteSession = async (
+  sessionId: string,
+  title: string,
+): Promise<ChatSession> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const { data, error } = await supabase
+    .from('sessions')
+    .update({ title })
+    .eq('id', sessionId)
+    .select('id,user_id,title,created_at,updated_at,override_model,override_reasoning,is_archived,archived_at')
+    .single()
+  if (error || !data) {
+    throw error ?? new Error('更新会话失败')
+  }
+  return mapSessionRow(data as SessionRow)
+}
+
+export const updateRemoteSessionOverride = async (
+  sessionId: string,
+  overrideModel: string | null,
+): Promise<ChatSession> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const { data, error } = await supabase
+    .from('sessions')
+    .update({ override_model: overrideModel })
+    .eq('id', sessionId)
+    .select('id,user_id,title,created_at,updated_at,override_model,override_reasoning,is_archived,archived_at')
+    .single()
+  if (error || !data) {
+    throw error ?? new Error('更新会话模型失败')
+  }
+  return mapSessionRow(data as SessionRow)
+}
+
+export const updateRemoteSessionReasoningOverride = async (
+  sessionId: string,
+  overrideReasoning: boolean | null,
+): Promise<ChatSession> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const { data, error } = await supabase
+    .from('sessions')
+    .update({ override_reasoning: overrideReasoning })
+    .eq('id', sessionId)
+    .select('id,user_id,title,created_at,updated_at,override_model,override_reasoning,is_archived,archived_at')
+    .single()
+  if (error || !data) {
+    throw error ?? new Error('更新会话思考链失败')
+  }
+  return mapSessionRow(data as SessionRow)
+}
+
+
+export const updateRemoteSessionArchiveState = async (
+  sessionId: string,
+  isArchived: boolean,
+): Promise<ChatSession> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const userId = await requireAuthenticatedUserId()
+  const updates = isArchived
+    ? { is_archived: true, archived_at: new Date().toISOString() }
+    : { is_archived: false, archived_at: null }
+  const { data, error } = await supabase
+    .from('sessions')
+    .update(updates)
+    .eq('id', sessionId)
+    .eq('user_id', userId)
+    .select('id,user_id,title,created_at,updated_at,override_model,override_reasoning,is_archived,archived_at')
+    .single()
+  if (error || !data) {
+    throw error ?? new Error('更新会话抽屉状态失败')
+  }
+  return mapSessionRow(data as SessionRow)
+}
+
+export const deleteRemoteSession = async (sessionId: string) => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const { error: messagesError } = await supabase
+    .from('messages')
+    .delete()
+    .eq('session_id', sessionId)
+  if (messagesError) {
+    throw messagesError
+  }
+  const { error: sessionError } = await supabase
+    .from('sessions')
+    .delete()
+    .eq('id', sessionId)
+  if (sessionError) {
+    throw sessionError
+  }
+}
+
+export const addRemoteMessage = async (
+  sessionId: string,
+  userId: string,
+  role: ChatMessage['role'],
+  content: string,
+  clientId: string,
+  clientCreatedAt: string,
+  meta?: ChatMessage['meta'],
+): Promise<{ message: ChatMessage; updatedAt: string }> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const safeMeta = meta ?? {}
+  const { data, error } = await supabase
+    .from('messages')
+    .insert({
+      session_id: sessionId,
+      user_id: userId,
+      role,
+      content,
+      client_id: clientId,
+      client_created_at: clientCreatedAt,
+      meta: safeMeta,
+    })
+    .select('id,session_id,user_id,role,content,created_at,client_id,client_created_at,meta')
+    .single()
+  if (error || !data) {
+    throw error ?? new Error('发送消息失败')
+  }
+  const { data: sessionData, error: sessionError } = await supabase
+    .from('sessions')
+    .select('updated_at')
+    .eq('id', sessionId)
+    .single()
+  if (sessionError || !sessionData) {
+    throw sessionError ?? new Error('刷新会话时间失败')
+  }
+  const message = mapMessageRow(data as MessageRow)
+  return { message, updatedAt: (sessionData as Pick<SessionRow, 'updated_at'>).updated_at }
+}
+
+export const deleteRemoteMessage = async (messageId: string) => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const { error } = await supabase.from('messages').delete().eq('id', messageId)
+  if (error) {
+    throw error
+  }
+}
+
+
+export const fetchSnackPosts = async (): Promise<SnackPost[]> => {
+  if (!supabase) {
+    return []
+  }
+  const { data, error } = await supabase
+    .from('snack_posts')
+    .select('id,user_id,content,created_at,updated_at,is_deleted')
+    .eq('is_deleted', false)
+    .order('created_at', { ascending: false })
+  if (error) {
+    throw error
+  }
+  return (data ?? []).map((row) => mapSnackPostRow(row as SnackPostRow))
+}
+
+
+export const fetchDeletedSnackPosts = async (): Promise<SnackPost[]> => {
+  if (!supabase) {
+    return []
+  }
+  const { data, error } = await supabase
+    .from('snack_posts')
+    .select('id,user_id,content,created_at,updated_at,is_deleted')
+    .eq('is_deleted', true)
+    .order('updated_at', { ascending: false })
+
+  if (error) {
+    throw error
+  }
+  return (data ?? []).map((row) => mapSnackPostRow(row as SnackPostRow))
+}
+
+export const createSnackPost = async (content: string): Promise<SnackPost> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const { data, error } = await supabase
+    .from('snack_posts')
+    .insert({ content })
+    .select('id,user_id,content,created_at,updated_at,is_deleted')
+    .single()
+
+  if (error || !data) {
+    throw error ?? new Error('发布零食记录失败')
+  }
+  const post = mapSnackPostRow(data as SnackPostRow)
+  return post
+}
+
+
+export const restoreSnackPost = async (postId: string): Promise<void> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const { error } = await supabase.rpc('restore_snack_post', { p_post_id: postId })
+
+  if (error) {
+    throw error
+  }
+}
+
+export const softDeleteSnackPost = async (postId: string): Promise<void> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const { error } = await supabase.rpc('soft_delete_snack_post', { p_post_id: postId })
+
+  if (error) {
+    throw error
+  }
+}
+
+export const fetchSnackReplies = async (postIds: string[]): Promise<SnackReply[]> => {
+  if (!supabase || postIds.length === 0) {
+    return []
+  }
+  const { data, error } = await supabase
+    .from('snack_replies')
+    .select('id,user_id,post_id,role,content,meta,created_at,is_deleted')
+    .in('post_id', postIds)
+    .in('role', ['user', 'assistant'])
+    .eq('is_deleted', false)
+    .order('created_at', { ascending: true })
+  if (error) {
+    throw error
+  }
+  return (data ?? []).map((row) => mapSnackReplyRow(row as SnackReplyRow))
+}
+
+export const fetchSnackRepliesByPost = async (postId: string): Promise<SnackReply[]> => {
+  if (!supabase) {
+    return []
+  }
+  const { data, error } = await supabase
+    .from('snack_replies')
+    .select('id,user_id,post_id,role,content,meta,created_at,is_deleted')
+    .eq('post_id', postId)
+    .eq('is_deleted', false)
+    .order('created_at', { ascending: true })
+
+  if (error) {
+    throw error
+  }
+  return (data ?? []).map((row) => mapSnackReplyRow(row as SnackReplyRow))
+}
+
+export const createSnackReply = async (
+  postId: string,
+  role: SnackReply['role'],
+  content: string,
+  meta: SnackReply['meta'],
+): Promise<SnackReply> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const { data, error } = await supabase
+    .from('snack_replies')
+    .insert({ post_id: postId, role, content, meta: meta ?? {} })
+    .select('id,user_id,post_id,role,content,meta,created_at,is_deleted')
+    .single()
+  if (error || !data) {
+    throw error ?? new Error('保存零食回复失败')
+  }
+  const reply = mapSnackReplyRow(data as SnackReplyRow)
+  return reply
+}
+
+export const softDeleteSnackReply = async (replyId: string): Promise<void> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const { error } = await supabase.rpc('soft_delete_snack_reply', { p_reply_id: replyId })
+
+  if (error) {
+    throw error
+  }
+}
+
+export const fetchDeletedSnackReplies = async (): Promise<SnackReply[]> => {
+  if (!supabase) {
+    return []
+  }
+  const { data, error } = await supabase
+    .from('snack_replies')
+    .select('id,user_id,post_id,role,content,meta,created_at,is_deleted')
+    .eq('is_deleted', true)
+    .order('created_at', { ascending: false })
+
+  if (error) {
+    throw error
+  }
+  return (data ?? []).map((row) => mapSnackReplyRow(row as SnackReplyRow))
+}
+
+export const restoreSnackReply = async (replyId: string): Promise<void> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const { error } = await supabase
+    .from('snack_replies')
+    .update({ is_deleted: false })
+    .eq('id', replyId)
+
+  if (error) {
+    throw error
+  }
+}
+
+export const permanentlyDeleteSnackPost = async (postId: string): Promise<void> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const { error: repliesError } = await supabase.from('snack_replies').delete().eq('post_id', postId)
+  if (repliesError) {
+    throw repliesError
+  }
+
+  const { error: postError } = await supabase
+    .from('snack_posts')
+    .delete()
+    .eq('id', postId)
+    .eq('is_deleted', true)
+
+  if (postError) {
+    throw postError
+  }
+}
+
+export const permanentlyDeleteSnackReply = async (replyId: string): Promise<void> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const { error } = await supabase
+    .from('snack_replies')
+    .delete()
+    .eq('id', replyId)
+    .eq('is_deleted', true)
+
+  if (error) {
+    throw error
+  }
+}
+
+
+export const fetchSyzygyPosts = async (): Promise<SyzygyPost[]> => {
+  if (!supabase) {
+    return []
+  }
+  const { data, error } = await supabase
+    .from('syzygy_posts')
+    .select('id,user_id,content,model_id,created_at,updated_at,is_deleted')
+    .eq('is_deleted', false)
+    .order('created_at', { ascending: false })
+  if (error) {
+    throw error
+  }
+  return (data ?? []).map((row) => mapSyzygyPostRow(row as SyzygyPostRow))
+}
+
+export const fetchDeletedSyzygyPosts = async (): Promise<SyzygyPost[]> => {
+  if (!supabase) {
+    return []
+  }
+  const { data, error } = await supabase
+    .from('syzygy_posts')
+    .select('id,user_id,content,model_id,created_at,updated_at,is_deleted')
+    .eq('is_deleted', true)
+    .order('updated_at', { ascending: false })
+
+  if (error) {
+    throw error
+  }
+  return (data ?? []).map((row) => mapSyzygyPostRow(row as SyzygyPostRow))
+}
+
+export const createSyzygyPost = async (
+  content: string,
+  selectedModelId: string | null = null,
+): Promise<SyzygyPost> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const userId = await requireAuthenticatedUserId()
+  const { data, error } = await supabase
+    .from('syzygy_posts')
+    .insert({ user_id: userId, content, model_id: selectedModelId ?? null })
+    .select('id,user_id,content,model_id,created_at,updated_at,is_deleted')
+    .single()
+
+  if (error || !data) {
+    throw error ?? new Error('发布观察日志失败')
+  }
+  const post = mapSyzygyPostRow(data as SyzygyPostRow)
+  return post
+}
+
+export const restoreSyzygyPost = async (postId: string): Promise<void> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const { error } = await supabase
+    .from('syzygy_posts')
+    .update({ is_deleted: false, deleted_at: null })
+    .eq('id', postId)
+
+  if (error) {
+    throw error
+  }
+}
+
+export const softDeleteSyzygyPost = async (postId: string): Promise<void> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const { error } = await supabase
+    .from('syzygy_posts')
+    .update({ is_deleted: true, deleted_at: new Date().toISOString() })
+    .eq('id', postId)
+
+  if (error) {
+    throw error
+  }
+}
+
+export const fetchSyzygyReplies = async (postIds: string[]): Promise<SyzygyReply[]> => {
+  if (!supabase || postIds.length === 0) {
+    return []
+  }
+  const { data, error } = await supabase
+    .from('syzygy_replies')
+    .select('id,user_id,post_id,author_role,content,model_id,created_at,is_deleted')
+    .in('post_id', postIds)
+    .in('author_role', ['user', 'ai'])
+    .eq('is_deleted', false)
+    .order('created_at', { ascending: true })
+  if (error) {
+    throw error
+  }
+  return (data ?? []).map((row) => mapSyzygyReplyRow(row as SyzygyReplyRow))
+}
+
+export const fetchSyzygyRepliesByPost = async (postId: string): Promise<SyzygyReply[]> => {
+  if (!supabase) {
+    return []
+  }
+  const { data, error } = await supabase
+    .from('syzygy_replies')
+    .select('id,user_id,post_id,author_role,content,model_id,created_at,is_deleted')
+    .eq('post_id', postId)
+    .eq('is_deleted', false)
+    .order('created_at', { ascending: true })
+
+  if (error) {
+    throw error
+  }
+  return (data ?? []).map((row) => mapSyzygyReplyRow(row as SyzygyReplyRow))
+}
+
+export const createSyzygyReply = async (
+  postId: string,
+  authorRole: SyzygyReply['authorRole'],
+  content: string,
+  selectedModelId: string | null = null,
+): Promise<SyzygyReply> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const userId = await requireAuthenticatedUserId()
+  const { data, error } = await supabase
+    .from('syzygy_replies')
+    .insert({
+      user_id: userId,
+      post_id: postId,
+      author_role: authorRole,
+      content,
+      model_id: selectedModelId ?? null,
+    })
+    .select('id,user_id,post_id,author_role,content,model_id,created_at,is_deleted')
+    .single()
+  if (error || !data) {
+    throw error ?? new Error('保存观察日志回复失败')
+  }
+  const reply = mapSyzygyReplyRow(data as SyzygyReplyRow)
+  return reply
+}
+
+export const softDeleteSyzygyReply = async (replyId: string): Promise<void> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const { error } = await supabase
+    .from('syzygy_replies')
+    .update({ is_deleted: true, deleted_at: new Date().toISOString() })
+    .eq('id', replyId)
+
+  if (error) {
+    throw error
+  }
+}
+
+export const fetchDeletedSyzygyReplies = async (): Promise<SyzygyReply[]> => {
+  if (!supabase) {
+    return []
+  }
+  const { data, error } = await supabase
+    .from('syzygy_replies')
+    .select('id,user_id,post_id,author_role,content,model_id,created_at,is_deleted')
+    .eq('is_deleted', true)
+    .order('created_at', { ascending: false })
+
+  if (error) {
+    throw error
+  }
+  return (data ?? []).map((row) => mapSyzygyReplyRow(row as SyzygyReplyRow))
+}
+
+export const restoreSyzygyReply = async (replyId: string): Promise<void> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const { error } = await supabase
+    .from('syzygy_replies')
+    .update({ is_deleted: false, deleted_at: null })
+    .eq('id', replyId)
+
+  if (error) {
+    throw error
+  }
+}
+
+export const permanentlyDeleteSyzygyPost = async (postId: string): Promise<void> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const { error: repliesError } = await supabase.from('syzygy_replies').delete().eq('post_id', postId)
+  if (repliesError) {
+    throw repliesError
+  }
+
+  const { error: postError } = await supabase
+    .from('syzygy_posts')
+    .delete()
+    .eq('id', postId)
+    .eq('is_deleted', true)
+
+  if (postError) {
+    throw postError
+  }
+}
+
+export const permanentlyDeleteSyzygyReply = async (replyId: string): Promise<void> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const { error } = await supabase
+    .from('syzygy_replies')
+    .delete()
+    .eq('id', replyId)
+    .eq('is_deleted', true)
+
+  if (error) {
+    throw error
+  }
+}
+
+const resolveForumAuthorPayload = async (
+  userId: string,
+  authorType: ForumAuthorType,
+  authorSlot?: number | null,
+  preferredAuthorName?: string,
+): Promise<{ authorSlot: number | null; authorName: string }> => {
+  if (authorType === 'user') {
+    return { authorSlot: null, authorName: FORUM_USER_AUTHOR_NAME }
+  }
+
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+
+  const normalizedSlot = authorSlot ?? 1
+  const preferredName = preferredAuthorName?.trim()
+  if (preferredName) {
+    return {
+      authorSlot: normalizedSlot,
+      authorName: preferredName,
+    }
+  }
+
+  const { data, error } = await supabase
+    .from('forum_ai_profiles')
+    .select('name')
+    .eq('user_id', userId)
+    .eq('slot_index', normalizedSlot)
+    .maybeSingle()
+
+  if (error) {
+    throw error
+  }
+
+  const profileName = data?.name?.trim()
+  return {
+    authorSlot: normalizedSlot,
+    authorName: profileName || `AI Slot ${normalizedSlot}`,
+  }
+}
+
+const resolveReplyTargetAuthorName = async (userId: string, threadId: string, replyId?: string | null) => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+
+  if (replyId) {
+    const { data, error } = await supabase
+      .from('forum_replies')
+      .select('author_name')
+      .eq('id', replyId)
+      .eq('thread_id', threadId)
+      .eq('user_id', userId)
+      .maybeSingle()
+
+    if (error) {
+      throw error
+    }
+
+    const targetName = data?.author_name?.trim()
+    if (targetName) {
+      return targetName
+    }
+  }
+
+  const { data: threadData, error: threadError } = await supabase
+    .from('forum_threads')
+    .select('author_name')
+    .eq('id', threadId)
+    .eq('user_id', userId)
+    .maybeSingle()
+
+  if (threadError) {
+    throw threadError
+  }
+
+  const threadAuthorName = threadData?.author_name?.trim()
+  return threadAuthorName || FORUM_USER_AUTHOR_NAME
+}
+
+export const fetchForumThreads = async (): Promise<ForumThread[]> => {
+  if (!supabase) {
+    return []
+  }
+  const userId = await requireAuthenticatedUserId()
+  const { data, error } = await supabase
+    .from('forum_threads')
+    .select('id,user_id,title,body,author_type,author_slot,author_name,created_at,updated_at')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+
+  if (error) {
+    throw error
+  }
+  return (data ?? []).map((row) => mapForumThreadRow(row as ForumThreadRow))
+}
+
+export const fetchForumThreadById = async (threadId: string): Promise<ForumThread | null> => {
+  if (!supabase) {
+    return null
+  }
+  const userId = await requireAuthenticatedUserId()
+  const { data, error } = await supabase
+    .from('forum_threads')
+    .select('id,user_id,title,body,author_type,author_slot,author_name,created_at,updated_at')
+    .eq('id', threadId)
+    .eq('user_id', userId)
+    .maybeSingle()
+
+  if (error) {
+    throw error
+  }
+  return data ? mapForumThreadRow(data as ForumThreadRow) : null
+}
+
+export const fetchForumReplyCountMap = async (threadIds: string[]): Promise<Record<string, number>> => {
+  if (!supabase || threadIds.length === 0) {
+    return {}
+  }
+  const userId = await requireAuthenticatedUserId()
+  const { data, error } = await supabase
+    .from('forum_replies')
+    .select('thread_id')
+    .eq('user_id', userId)
+    .in('thread_id', threadIds)
+
+  if (error) {
+    throw error
+  }
+
+  return (data ?? []).reduce<Record<string, number>>((acc, row) => {
+    const threadId = String((row as { thread_id: string }).thread_id)
+    acc[threadId] = (acc[threadId] ?? 0) + 1
+    return acc
+  }, {})
+}
+
+export const createForumThread = async (params: {
+  title: string
+  content: string
+  authorType: ForumAuthorType
+  authorSlot?: number | null
+  authorName?: string
+}): Promise<ForumThread> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const userId = await requireAuthenticatedUserId()
+  const now = new Date().toISOString()
+  const authorPayload = await resolveForumAuthorPayload(userId, params.authorType, params.authorSlot, params.authorName)
+  const { data, error } = await supabase
+    .from('forum_threads')
+    .insert({
+      user_id: userId,
+      title: params.title,
+      body: params.content,
+      author_type: params.authorType,
+      author_slot: authorPayload.authorSlot,
+      author_name: authorPayload.authorName,
+      created_at: now,
+      updated_at: now,
+    })
+    .select('id,user_id,title,body,author_type,author_slot,author_name,created_at,updated_at')
+    .single()
+
+  if (error || !data) {
+    throw error ?? new Error('创建论坛主题失败')
+  }
+  const thread = mapForumThreadRow(data as ForumThreadRow)
+  return thread
+}
+
+export const fetchForumRepliesByThread = async (threadId: string): Promise<ForumReply[]> => {
+  if (!supabase) {
+    return []
+  }
+  const userId = await requireAuthenticatedUserId()
+  const { data, error } = await supabase
+    .from('forum_replies')
+    .select('id,thread_id,user_id,body,author_type,author_slot,author_name,parent_id,reply_to_reply_id,reply_to_author_name,created_at')
+    .eq('thread_id', threadId)
+    .eq('user_id', userId)
+    .order('created_at', { ascending: true })
+
+  if (error) {
+    throw error
+  }
+  return (data ?? []).map((row) => mapForumReplyRow(row as ForumReplyRow))
+}
+
+export const fetchForumReplyTreeByThread = async (threadId: string): Promise<ForumReply[]> => {
+  if (!supabase) {
+    return []
+  }
+  const userId = await requireAuthenticatedUserId()
+  const { data, error } = await supabase.rpc('get_forum_thread_replies_tree', { p_thread_id: threadId })
+
+  if (error) {
+    throw error
+  }
+
+  const rows = (data ?? []) as ForumReplyRow[]
+  return rows.filter((row) => row.user_id === userId).map((row) => mapForumReplyRow(row))
+}
+
+export const createForumReply = async (params: {
+  threadId: string
+  content: string
+  authorType: ForumAuthorType
+  authorSlot?: number | null
+  parentId?: string | null
+  replyToType?: 'thread' | 'reply' | null
+  replyToReplyId?: string | null
+}): Promise<ForumReply> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const userId = await requireAuthenticatedUserId()
+  const normalizedParentId = params.replyToType === 'thread'
+    ? null
+    : params.parentId ?? params.replyToReplyId ?? null
+  const authorPayload = await resolveForumAuthorPayload(userId, params.authorType, params.authorSlot)
+  const replyToAuthorName = await resolveReplyTargetAuthorName(userId, params.threadId, normalizedParentId)
+  const { data, error } = await supabase
+    .from('forum_replies')
+    .insert({
+      thread_id: params.threadId,
+      user_id: userId,
+      body: params.content,
+      author_type: params.authorType,
+      author_slot: authorPayload.authorSlot,
+      author_name: authorPayload.authorName,
+      parent_id: normalizedParentId,
+      reply_to_reply_id: normalizedParentId,
+      reply_to_author_name: replyToAuthorName,
+    })
+    .select('id,thread_id,user_id,body,author_type,author_slot,author_name,parent_id,reply_to_reply_id,reply_to_author_name,created_at')
+    .single()
+
+  if (error || !data) {
+    throw error ?? new Error('创建论坛回复失败')
+  }
+  const reply = mapForumReplyRow(data as ForumReplyRow)
+  return reply
+}
+
+export const deleteForumThread = async (threadId: string): Promise<void> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const userId = await requireAuthenticatedUserId()
+  const { error } = await supabase.from('forum_threads').delete().eq('id', threadId).eq('user_id', userId)
+
+  if (error) {
+    throw error
+  }
+}
+
+export const deleteForumReply = async (replyId: string, threadId: string): Promise<void> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const userId = await requireAuthenticatedUserId()
+  const { error } = await supabase
+    .from('forum_replies')
+    .delete()
+    .eq('id', replyId)
+    .eq('thread_id', threadId)
+    .eq('user_id', userId)
+
+  if (error) {
+    throw error
+  }
+}
+
+export const fetchForumAiProfiles = async (): Promise<ForumAiProfile[]> => {
+  if (!supabase) {
+    return []
+  }
+  const userId = await requireAuthenticatedUserId()
+  const { data, error } = await supabase
+    .from('forum_ai_profiles')
+    .select('id,user_id,slot_index,enabled,name,system_prompt,model,temperature,top_p,api_base_url,context_token_limit,created_at,updated_at')
+    .eq('user_id', userId)
+    .in('slot_index', [1, 2, 3])
+    .order('slot_index', { ascending: true })
+
+  if (error) {
+    throw error
+  }
+  return (data ?? []).map((row) => mapForumAiProfileRow(row as ForumAiProfileRow))
+}
+
+export const upsertForumAiProfile = async (
+  slotIndex: number,
+  payload: {
+    enabled: boolean
+    displayName: string
+    systemPrompt: string
+    model: string
+    temperature: number
+    topP: number
+    contextTokenLimit: number
+    apiBaseUrl: string
+  },
+): Promise<ForumAiProfile> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const userId = await requireAuthenticatedUserId()
+  const now = new Date().toISOString()
+  const { data, error } = await supabase
+    .from('forum_ai_profiles')
+    .upsert(
+      {
+        user_id: userId,
+        slot_index: slotIndex,
+        enabled: payload.enabled,
+        name: payload.displayName,
+        system_prompt: payload.systemPrompt,
+        model: payload.model,
+        temperature: payload.temperature,
+        top_p: payload.topP,
+        context_token_limit: normalizeForumContextTokenLimit(payload.contextTokenLimit),
+        api_base_url: payload.apiBaseUrl,
+        updated_at: now,
+      },
+      { onConflict: 'user_id,slot_index' },
+    )
+    .select('id,user_id,slot_index,enabled,name,system_prompt,model,temperature,top_p,api_base_url,context_token_limit,created_at,updated_at')
+    .single()
+
+  if (error || !data) {
+    throw error ?? new Error('保存论坛 AI 档案失败')
+  }
+
+  return mapForumAiProfileRow(data as ForumAiProfileRow)
+}
+
+export const fetchAllMemoryEntries = async (): Promise<MemoryEntry[]> => {
+  if (!supabase) {
+    return []
+  }
+  const userId = await requireAuthenticatedUserId()
+  const { data, error } = await supabase
+    .from('memory_entries')
+    .select('id,user_id,content,source,status,created_at,updated_at,is_deleted')
+    .eq('user_id', userId)
+    .eq('is_deleted', false)
+    .order('created_at', { ascending: true })
+  if (error) {
+    throw error
+  }
+  return (data ?? []).map((row) => mapMemoryEntryRow(row as MemoryEntryRow))
+}
+
+export const listMemories = async (status: MemoryStatus): Promise<MemoryEntry[]> => {
+  if (!supabase) {
+    return []
+  }
+  const userId = await requireAuthenticatedUserId()
+  const { data, error } = await supabase
+    .from('memory_entries')
+    .select('id,user_id,content,source,status,created_at,updated_at,is_deleted')
+    .eq('user_id', userId)
+    .eq('status', status)
+    .eq('is_deleted', false)
+    .order('created_at', { ascending: false })
+  if (error) {
+    throw error
+  }
+  return (data ?? []).map((row) => mapMemoryEntryRow(row as MemoryEntryRow))
+}
+
+export const fetchPendingMemoryCount = async (userId: string): Promise<number> => {
+  if (!supabase) {
+    return 0
+  }
+  const { count, error } = await supabase
+    .from('memory_entries')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', userId)
+    .eq('status', 'pending')
+    .eq('is_deleted', false)
+  if (error) {
+    throw error
+  }
+  return count ?? 0
+}
+
+export const createMemory = async (content: string): Promise<MemoryEntry> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const userId = await requireAuthenticatedUserId()
+  const now = new Date().toISOString()
+  const { data, error } = await supabase
+    .from('memory_entries')
+    .insert({
+      user_id: userId,
+      content,
+      source: 'user_created',
+      status: 'confirmed',
+      created_at: now,
+      updated_at: now,
+      is_deleted: false,
+    })
+    .select('id,user_id,content,source,status,created_at,updated_at,is_deleted')
+    .single()
+  if (error || !data) {
+    throw error ?? new Error('创建记忆失败')
+  }
+  return mapMemoryEntryRow(data as MemoryEntryRow)
+}
+
+export const updateMemory = async (id: string, content: string): Promise<MemoryEntry> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const now = new Date().toISOString()
+  const { data, error } = await supabase
+    .from('memory_entries')
+    .update({ content, source: 'user_edited', updated_at: now })
+    .eq('id', id)
+    .eq('is_deleted', false)
+    .select('id,user_id,content,source,status,created_at,updated_at,is_deleted')
+    .single()
+  if (error || !data) {
+    throw error ?? new Error('更新记忆失败')
+  }
+  return mapMemoryEntryRow(data as MemoryEntryRow)
+}
+
+export const confirmMemory = async (id: string, content?: string): Promise<MemoryEntry> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const now = new Date().toISOString()
+  const updates: Record<string, unknown> = {
+    status: 'confirmed',
+    updated_at: now,
+  }
+  if (typeof content === 'string') {
+    updates.content = content
+    updates.source = 'user_edited'
+  }
+  const { data, error } = await supabase
+    .from('memory_entries')
+    .update(updates)
+    .eq('id', id)
+    .eq('is_deleted', false)
+    .select('id,user_id,content,source,status,created_at,updated_at,is_deleted')
+    .single()
+  if (error || !data) {
+    throw error ?? new Error('确认记忆失败')
+  }
+  return mapMemoryEntryRow(data as MemoryEntryRow)
+}
+
+export const discardMemory = async (id: string): Promise<void> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const { error } = await supabase
+    .from('memory_entries')
+    .update({ is_deleted: true, updated_at: new Date().toISOString() })
+    .eq('id', id)
+  if (error) {
+    throw error
+  }
+}
+
+export const listMemoTags = async (): Promise<MemoTag[]> => {
+  if (!supabase) {
+    return []
+  }
+  const userId = await requireAuthenticatedUserId()
+  const { data, error } = await supabase
+    .from('memo_tags')
+    .select('id,user_id,name,created_at')
+    .eq('user_id', userId)
+    .order('name', { ascending: true })
+  if (error) {
+    throw error
+  }
+  return (data ?? []).map((row) => mapMemoTagRow(row as MemoTagRow))
+}
+
+export const createMemoTag = async (name: string): Promise<MemoTag> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const userId = await requireAuthenticatedUserId()
+  const trimmed = name.trim()
+  if (!trimmed) {
+    throw new Error('标签名不能为空')
+  }
+  const { data: existing, error: findError } = await supabase
+    .from('memo_tags')
+    .select('id,user_id,name,created_at')
+    .eq('user_id', userId)
+    .eq('name', trimmed)
+    .maybeSingle()
+  if (findError) {
+    throw findError
+  }
+  if (existing) {
+    return mapMemoTagRow(existing as MemoTagRow)
+  }
+  const { data, error } = await supabase
+    .from('memo_tags')
+    .insert({ user_id: userId, name: trimmed })
+    .select('id,user_id,name,created_at')
+    .single()
+  if (error || !data) {
+    throw error ?? new Error('创建标签失败')
+  }
+  return mapMemoTagRow(data as MemoTagRow)
+}
+
+export const listMemoEntries = async (): Promise<MemoEntry[]> => {
+  if (!supabase) {
+    return []
+  }
+  const userId = await requireAuthenticatedUserId()
+  const { data: entryRows, error: entryError } = await supabase
+    .from('memo_entries')
+    .select('id,user_id,content,source,is_pinned,created_at,updated_at')
+    .eq('user_id', userId)
+    .order('updated_at', { ascending: false })
+  if (entryError) {
+    throw entryError
+  }
+  const entries = (entryRows ?? []) as MemoEntryRow[]
+  if (entries.length === 0) {
+    return []
+  }
+  const entryIds = entries.map((entry) => entry.id)
+  const { data: relationRows, error: relationError } = await supabase
+    .from('memo_entry_tags')
+    .select('memo_entry_id,memo_tag_id')
+    .in('memo_entry_id', entryIds)
+  if (relationError) {
+    throw relationError
+  }
+
+  const tagIdsByEntryId = new Map<string, string[]>()
+  ;((relationRows ?? []) as MemoEntryTagRow[]).forEach((relation) => {
+    const current = tagIdsByEntryId.get(relation.memo_entry_id) ?? []
+    current.push(relation.memo_tag_id)
+    tagIdsByEntryId.set(relation.memo_entry_id, current)
+  })
+  return entries.map((entry) => mapMemoEntryRow(entry, tagIdsByEntryId.get(entry.id) ?? []))
+}
+
+export const createMemoEntry = async (payload: {
+  content: string
+  isPinned: boolean
+  source?: MemoSource
+  tagIds: string[]
+}): Promise<void> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const userId = await requireAuthenticatedUserId()
+  const now = new Date().toISOString()
+  const { data: entry, error: entryError } = await supabase
+    .from('memo_entries')
+    .insert({
+      user_id: userId,
+      content: payload.content,
+      source: payload.source ?? 'user',
+      is_pinned: payload.isPinned,
+      created_at: now,
+      updated_at: now,
+    })
+    .select('id')
+    .single()
+  if (entryError || !entry) {
+    throw entryError ?? new Error('创建备忘录失败')
+  }
+  const uniqueTagIds = Array.from(new Set(payload.tagIds))
+  if (uniqueTagIds.length === 0) {
+    return
+  }
+  const { error: linkError } = await supabase.from('memo_entry_tags').insert(
+    uniqueTagIds.map((tagId) => ({
+      memo_entry_id: entry.id,
+      memo_tag_id: tagId,
+    })),
+  )
+  if (linkError) {
+    throw linkError
+  }
+}
+
+export const updateMemoEntry = async (
+  entryId: string,
+  payload: { content: string; isPinned: boolean; tagIds: string[] },
+): Promise<void> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const now = new Date().toISOString()
+  const { error: updateError } = await supabase
+    .from('memo_entries')
+    .update({
+      content: payload.content,
+      is_pinned: payload.isPinned,
+      updated_at: now,
+    })
+    .eq('id', entryId)
+  if (updateError) {
+    throw updateError
+  }
+
+  const { error: deleteLinksError } = await supabase
+    .from('memo_entry_tags')
+    .delete()
+    .eq('memo_entry_id', entryId)
+  if (deleteLinksError) {
+    throw deleteLinksError
+  }
+
+  const uniqueTagIds = Array.from(new Set(payload.tagIds))
+  if (uniqueTagIds.length === 0) {
+    return
+  }
+  const { error: linkError } = await supabase.from('memo_entry_tags').insert(
+    uniqueTagIds.map((tagId) => ({
+      memo_entry_id: entryId,
+      memo_tag_id: tagId,
+    })),
+  )
+  if (linkError) {
+    throw linkError
+  }
+}
+
+export const deleteMemoEntry = async (entryId: string): Promise<void> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  // 物理删除：先清标签关联行再删主行（外键本身也带 ON DELETE CASCADE 兜底）。
+  const { error: unlinkError } = await supabase
+    .from('memo_entry_tags')
+    .delete()
+    .eq('memo_entry_id', entryId)
+  if (unlinkError) {
+    throw unlinkError
+  }
+  const { error } = await supabase
+    .from('memo_entries')
+    .delete()
+    .eq('id', entryId)
+  if (error) {
+    throw error
+  }
+}
+
+export const listTimelineEntriesByMonth = async (
+  monthStart: string,
+  monthEnd: string,
+): Promise<TimelineEntry[]> => {
+  if (!supabase) {
+    return []
+  }
+  const userId = await requireAuthenticatedUserId()
+  const { data, error } = await supabase
+    .from('timeline_entries')
+    .select('id,user_id,event_date,summary,recorder,source,created_at,updated_at')
+    .eq('user_id', userId)
+    .gte('event_date', monthStart)
+    .lte('event_date', monthEnd)
+    .order('event_date', { ascending: false })
+    .order('created_at', { ascending: true })
+  if (error) {
+    throw error
+  }
+  return (data ?? []).map((row) => mapTimelineEntryRow(row as TimelineEntryRow))
+}
+
+export const createTimelineEntry = async (payload: {
+  eventDate: string
+  summary: string
+  recorder: TimelineRecorder
+  source?: TimelineSource
+}): Promise<void> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const userId = await requireAuthenticatedUserId()
+  const { error } = await supabase.from('timeline_entries').insert({
+    user_id: userId,
+    event_date: payload.eventDate,
+    summary: payload.summary,
+    recorder: payload.recorder,
+    // 仓鼠窝前端手动写入默认标记来源为 frontend。
+    source: payload.source ?? 'frontend',
+  })
+  if (error) {
+    throw error
+  }
+}
+
+export const updateTimelineEntry = async (
+  entryId: string,
+  payload: {
+    eventDate: string
+    summary: string
+    recorder: TimelineRecorder
+    source?: TimelineSource
+  },
+): Promise<void> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const { error } = await supabase
+    .from('timeline_entries')
+    .update({
+      event_date: payload.eventDate,
+      summary: payload.summary,
+      recorder: payload.recorder,
+      ...(payload.source ? { source: payload.source } : {}),
+    })
+    .eq('id', entryId)
+  if (error) {
+    throw error
+  }
+}
+
+export const deleteTimelineEntry = async (entryId: string): Promise<void> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const { error } = await supabase.from('timeline_entries').delete().eq('id', entryId)
+  if (error) {
+    throw error
+  }
+}
+
+
+export const listTodosByMonth = async (
+  monthStart: string,
+  monthEnd: string,
+): Promise<TodoItem[]> => {
+  if (!supabase) {
+    return []
+  }
+  const userId = await requireAuthenticatedUserId()
+  const { data, error } = await supabase
+    .from('todos')
+    .select('id,user_id,category_id,date,title,notes,status,todo_type,event_date,created_by,sort_order,created_at,completed_at')
+    .eq('user_id', userId)
+    .gte('date', monthStart)
+    .lte('date', monthEnd)
+    .order('date', { ascending: true })
+    .order('sort_order', { ascending: true })
+    .order('created_at', { ascending: true })
+  if (error) {
+    throw error
+  }
+  return (data ?? []).map((row) => mapTodoItemRow(row as TodoItemRow))
+}
+
+export const listTodoCategoriesByDate = async (date: string): Promise<TodoCategory[]> => {
+  if (!supabase) {
+    return []
+  }
+  const userId = await requireAuthenticatedUserId()
+  const { data, error } = await supabase
+    .from('todo_categories')
+    .select('id,user_id,date,name,sort_order,created_at')
+    .eq('user_id', userId)
+    .eq('date', date)
+    .order('sort_order', { ascending: true })
+    .order('created_at', { ascending: true })
+  if (error) {
+    throw error
+  }
+  return (data ?? []).map((row) => mapTodoCategoryRow(row as TodoCategoryRow))
+}
+
+export const listTodosByDate = async (date: string): Promise<TodoItem[]> => {
+  if (!supabase) {
+    return []
+  }
+  const userId = await requireAuthenticatedUserId()
+  const { data, error } = await supabase
+    .from('todos')
+    .select('id,user_id,category_id,date,title,notes,status,todo_type,event_date,created_by,sort_order,created_at,completed_at')
+    .eq('user_id', userId)
+    .eq('date', date)
+    .order('sort_order', { ascending: true })
+    .order('created_at', { ascending: true })
+  if (error) {
+    throw error
+  }
+  return (data ?? []).map((row) => mapTodoItemRow(row as TodoItemRow))
+}
+
+export type TodoDashboardData = {
+  // 近期待办（todo_type=short_term 或空），尚未完成的项目，前端再按 status 拆成未完成 / 进行中。
+  nearTermOpen: TodoItem[]
+  // 长期待办（todo_type=long_term），按 event_date 升序，空目标日期排在最后。
+  longTerm: TodoItem[]
+}
+
+export const listTodoDashboard = async (): Promise<TodoDashboardData> => {
+  if (!supabase) {
+    return { nearTermOpen: [], longTerm: [] }
+  }
+  const userId = await requireAuthenticatedUserId()
+  const columns =
+    'id,user_id,category_id,date,title,notes,status,todo_type,event_date,created_by,sort_order,created_at,completed_at'
+  const [nearTermRes, longTermRes] = await Promise.all([
+    supabase
+      .from('todos')
+      .select(columns)
+      .eq('user_id', userId)
+      .neq('status', 'completed')
+      .or('todo_type.eq.short_term,todo_type.is.null')
+      .order('date', { ascending: true })
+      .order('sort_order', { ascending: true })
+      .order('created_at', { ascending: true }),
+    supabase
+      .from('todos')
+      .select(columns)
+      .eq('user_id', userId)
+      .eq('todo_type', 'long_term')
+      .order('event_date', { ascending: true, nullsFirst: false })
+      .order('created_at', { ascending: true }),
+  ])
+  if (nearTermRes.error) {
+    throw nearTermRes.error
+  }
+  if (longTermRes.error) {
+    throw longTermRes.error
+  }
+  return {
+    nearTermOpen: (nearTermRes.data ?? []).map((row) => mapTodoItemRow(row as TodoItemRow)),
+    longTerm: (longTermRes.data ?? []).map((row) => mapTodoItemRow(row as TodoItemRow)),
+  }
+}
+
+export const createTodoCategory = async (payload: {
+  date: string
+  name: string
+  sortOrder: number
+}): Promise<void> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const userId = await requireAuthenticatedUserId()
+  const { error } = await supabase.from('todo_categories').insert({
+    user_id: userId,
+    date: payload.date,
+    name: payload.name,
+    sort_order: payload.sortOrder,
+  })
+  if (error) {
+    throw error
+  }
+}
+
+export const createTodoItem = async (payload: {
+  categoryId: string
+  date: string
+  title: string
+  notes: string | null
+  createdBy: TodoCreatedBy
+  sortOrder: number
+  todoType?: TodoType
+  eventDate?: string | null
+}): Promise<void> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const userId = await requireAuthenticatedUserId()
+  const todoType = payload.todoType ?? 'short_term'
+  const { error } = await supabase.from('todos').insert({
+    user_id: userId,
+    category_id: payload.categoryId,
+    date: payload.date,
+    title: payload.title,
+    notes: payload.notes,
+    status: 'pending',
+    todo_type: todoType,
+    // 仅长期待办保留目标日期，近期待办不写 event_date。
+    event_date: todoType === 'long_term' ? payload.eventDate ?? null : null,
+    created_by: payload.createdBy,
+    sort_order: payload.sortOrder,
+  })
+  if (error) {
+    throw error
+  }
+}
+
+export const updateTodoItem = async (
+  todoId: string,
+  payload: {
+    title: string
+    notes: string | null
+    createdBy: TodoCreatedBy
+    todoType?: TodoType
+    eventDate?: string | null
+  },
+): Promise<void> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const userId = await requireAuthenticatedUserId()
+  const patch: Record<string, unknown> = {
+    title: payload.title,
+    notes: payload.notes,
+    created_by: payload.createdBy,
+  }
+  if (payload.todoType) {
+    patch.todo_type = payload.todoType
+    patch.event_date = payload.todoType === 'long_term' ? payload.eventDate ?? null : null
+  }
+  const { error } = await supabase
+    .from('todos')
+    .update(patch)
+    .eq('id', todoId)
+    .eq('user_id', userId)
+  if (error) {
+    throw error
+  }
+}
+
+
+export const deleteTodoItem = async (todoId: string): Promise<void> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const userId = await requireAuthenticatedUserId()
+  const { error } = await supabase
+    .from('todos')
+    .delete()
+    .eq('id', todoId)
+    .eq('user_id', userId)
+  if (error) {
+    throw error
+  }
+}
+
+export const deleteTodoCategory = async (categoryId: string): Promise<void> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const userId = await requireAuthenticatedUserId()
+  const { error: todoError } = await supabase
+    .from('todos')
+    .delete()
+    .eq('category_id', categoryId)
+    .eq('user_id', userId)
+  if (todoError) {
+    throw todoError
+  }
+  const { error: categoryError } = await supabase
+    .from('todo_categories')
+    .delete()
+    .eq('id', categoryId)
+    .eq('user_id', userId)
+  if (categoryError) {
+    throw categoryError
+  }
+}
+
+export const updateTodoItemStatus = async (todoId: string, status: TodoStatus): Promise<void> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const userId = await requireAuthenticatedUserId()
+  const { error } = await supabase
+    .from('todos')
+    .update({
+      status,
+      completed_at: status === 'completed' ? new Date().toISOString() : null,
+    })
+    .eq('id', todoId)
+    .eq('user_id', userId)
+  if (error) {
+    throw error
+  }
+}
+
+export const listWikiEntries = async (): Promise<WikiEntry[]> => {
+  if (!supabase) {
+    return []
+  }
+  const userId = await requireAuthenticatedUserId()
+  const { data, error } = await supabase
+    .from('wiki_entries')
+    .select('id,user_id,title,content,category,tags,status,created_at,updated_at')
+    .eq('user_id', userId)
+    .order('category', { ascending: true })
+    .order('title', { ascending: true })
+  if (error) {
+    throw error
+  }
+  return (data ?? []).map((row) => mapWikiEntryRow(row as WikiEntryRow))
+}
+
+export const createWikiEntry = async (payload: {
+  title: string
+  content: string
+  category: string
+  tags: string[]
+  status?: WikiEntryStatus
+}): Promise<void> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const userId = await requireAuthenticatedUserId()
+  const { error } = await supabase.from('wiki_entries').insert({
+    user_id: userId,
+    title: payload.title,
+    content: payload.content,
+    category: payload.category,
+    tags: payload.tags,
+    status: payload.status ?? 'draft',
+  })
+  if (error) {
+    throw error
+  }
+}
+
+export const updateWikiEntry = async (
+  entryId: string,
+  payload: {
+    title: string
+    content: string
+    category: string
+    tags: string[]
+    status: WikiEntryStatus
+  },
+): Promise<void> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const { error } = await supabase
+    .from('wiki_entries')
+    .update({
+      title: payload.title,
+      content: payload.content,
+      category: payload.category,
+      tags: payload.tags,
+      status: payload.status,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', entryId)
+  if (error) {
+    throw error
+  }
+}
+
+export const listAgentCouncilMessages = async (): Promise<AgentCouncilMessage[]> => {
+  if (!supabase) {
+    return []
+  }
+  const { data, error } = await supabase
+    .from('agent_council')
+    .select(AGENT_COUNCIL_SELECT_FIELDS)
+    .order('created_at', { ascending: true })
+  if (error) {
+    throw error
+  }
+  return (data ?? []).map((row) => mapAgentCouncilRow(row as AgentCouncilRow))
+}
+
+// 发起一条正式主提案（parent_id 为空、entry_type=proposal、初始状态 open）。
+export const createAgentCouncilProposal = async (payload: {
+  topic: string
+  message: string
+  speaker?: AgentCouncilSpeaker
+  category?: AgentCouncilCategory
+  metadata?: AgentCouncilMetadata
+}): Promise<AgentCouncilMessage> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const userId = await requireAuthenticatedUserId()
+  const { data, error } = await supabase
+    .from('agent_council')
+    .insert({
+      user_id: userId,
+      speaker: payload.speaker ?? 'chuanchuan',
+      topic: payload.topic,
+      message: payload.message,
+      entry_type: 'proposal',
+      proposal_status: 'open',
+      parent_id: null,
+      category: payload.category ?? 'other',
+      metadata: (payload.metadata ?? {}) as Json,
+    })
+    .select(AGENT_COUNCIL_SELECT_FIELDS)
+    .single()
+  if (error || !data) {
+    throw error ?? new Error('发起提案失败')
+  }
+  return mapAgentCouncilRow(data as AgentCouncilRow)
+}
+
+// 给某条主提案添加一条评估回复（entry_type=review），并记录态度 vote；category 从父提案继承。
+export const createAgentCouncilReview = async (payload: {
+  parentId: string
+  topic: string
+  message: string
+  vote: AgentCouncilVote
+  speaker?: AgentCouncilSpeaker
+  category?: string | null
+}): Promise<void> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const userId = await requireAuthenticatedUserId()
+  const { error } = await supabase.from('agent_council').insert({
+    user_id: userId,
+    speaker: payload.speaker ?? 'chuanchuan',
+    topic: payload.topic,
+    message: payload.message,
+    entry_type: 'review',
+    parent_id: payload.parentId,
+    vote: payload.vote,
+    category: payload.category ?? null,
+  })
+  if (error) {
+    throw error
+  }
+}
+
+// 串串拍板：更新主提案 proposal_status（approved 时一并落 executor 指派），并插入 decision 记录留痕。
+// executor 语义与 MCP 工具 council_decide 一致：只有 codex_cli / claude_code_cli 会唤醒 Mac mini 接单脚本；
+// 缺省 NULL = 不唤醒任何脚本（安全默认）；重复拍板即改派；非 approved 拍板清空 executor。
+export const decideAgentCouncilProposal = async (payload: {
+  proposalId: string
+  topic: string
+  status: 'approved' | 'rejected' | 'deferred'
+  note?: string
+  speaker?: AgentCouncilSpeaker
+  executor?: AgentCouncilExecutor | null
+  category?: string | null
+}): Promise<void> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const userId = await requireAuthenticatedUserId()
+  const nowIso = new Date().toISOString()
+  const nextExecutor = payload.status === 'approved' ? (payload.executor ?? null) : null
+  const { error: updateError } = await supabase
+    .from('agent_council')
+    .update({ proposal_status: payload.status, executor: nextExecutor, updated_at: nowIso })
+    .eq('id', payload.proposalId)
+  if (updateError) {
+    throw updateError
+  }
+  const statusLabel =
+    payload.status === 'approved' ? '已拍板' : payload.status === 'rejected' ? '已拒绝' : '暂缓'
+  const note = payload.note?.trim()
+  const message = note
+    ? note
+    : nextExecutor
+      ? `串串拍板：${statusLabel}，指派 ${nextExecutor} 执行`
+      : `串串拍板：${statusLabel}`
+  const { error: insertError } = await supabase.from('agent_council').insert({
+    user_id: userId,
+    speaker: payload.speaker ?? 'chuanchuan',
+    topic: payload.topic,
+    message,
+    entry_type: 'decision',
+    parent_id: payload.proposalId,
+    category: payload.category ?? null,
+    metadata: {
+      decision_status: payload.status,
+      ...(nextExecutor ? { executor: nextExecutor } : {}),
+    },
+  })
+  if (insertError) {
+    throw insertError
+  }
+}
+
+// 分类槽位：固定 8 个 key，label 可改名（council_categories 表，见 migration 20260716070023）。
+export const listCouncilCategories = async (): Promise<CouncilCategorySlot[]> => {
+  if (!supabase) {
+    return []
+  }
+  const { data, error } = await supabase
+    .from('council_categories')
+    .select('key,label,sort_order')
+    .order('sort_order', { ascending: true })
+  if (error) {
+    throw error
+  }
+  return (data ?? []).map((row) => ({
+    key: row.key as string,
+    label: row.label as string,
+    sortOrder: row.sort_order as number,
+  }))
+}
+
+// 给分类槽位改名（只允许动 label；key/槽位数量由 DB 权限锁死）。
+export const renameCouncilCategory = async (key: string, label: string): Promise<void> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const trimmed = label.trim()
+  if (!trimmed) {
+    throw new Error('分类名称不能为空')
+  }
+  const { error } = await supabase.from('council_categories').update({ label: trimmed }).eq('key', key)
+  if (error) {
+    throw error
+  }
+}
+
+// 修改提案的主题分类：主行更新，且子条目（评估/拍板/回执）一并跟随，保持继承一致。
+export const updateAgentCouncilProposalCategory = async (
+  proposalId: string,
+  category: string,
+): Promise<void> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const nowIso = new Date().toISOString()
+  const { error: mainError } = await supabase
+    .from('agent_council')
+    .update({ category, updated_at: nowIso })
+    .eq('id', proposalId)
+  if (mainError) {
+    throw mainError
+  }
+  const { error: childError } = await supabase
+    .from('agent_council')
+    .update({ category })
+    .eq('parent_id', proposalId)
+  if (childError) {
+    throw childError
+  }
+}
+
+// 提交执行回执：调用 DB 函数 council_submit_report（写回标准的唯一实现，与 MCP 工具 council_report 同源）。
+// 一次完成：插 report 子条目 / 翻主提案状态（succeeded、partial→done，failed→failed）/ 写 agent_events 推横幅。
+export const submitAgentCouncilReport = async (payload: {
+  proposalId: string
+  speaker: AgentCouncilSpeaker
+  message: string
+  result: AgentCouncilReportResult
+  artifacts?: string[]
+  followUps?: string[]
+}): Promise<void> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const { error } = await supabase.rpc('council_submit_report', {
+    p_proposal_id: payload.proposalId,
+    p_speaker: payload.speaker,
+    p_message: payload.message,
+    p_result: payload.result,
+    p_artifacts: payload.artifacts && payload.artifacts.length > 0 ? payload.artifacts : undefined,
+    p_follow_ups: payload.followUps && payload.followUps.length > 0 ? payload.followUps : undefined,
+  })
+  if (error) {
+    throw error
+  }
+}
+
+// 删除一条主提案；其下的评估/拍板记录通过外键 ON DELETE CASCADE 一并删除。
+export const deleteAgentCouncilProposal = async (proposalId: string): Promise<void> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const { error } = await supabase.from('agent_council').delete().eq('id', proposalId)
+  if (error) {
+    throw error
+  }
+}
+
+// 删除整条 topic 下的全部消息（用于清理旧版历史消息）。
+export const deleteAgentCouncilTopic = async (topic: string): Promise<void> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const { error } = await supabase.from('agent_council').delete().eq('topic', topic)
+  if (error) {
+    throw error
+  }
+}
+
+const assertRpcSuccess = (rpcName: string, payload: unknown) => {
+  const result =
+    payload && typeof payload === 'object' && 'success' in payload
+      ? (payload as { success?: unknown })
+      : null
+  if (!result || result.success !== true) {
+    throw new Error(`${rpcName} 执行失败`)
+  }
+}
+
+export const fetchWalletBalance = async (): Promise<WalletBalance> => {
+  if (!supabase) {
+    return { points: 0, coins: 0 }
+  }
+  const { data, error } = await supabase.from('wallet_balance').select('points,coins').maybeSingle()
+  if (error) {
+    throw error
+  }
+  if (!data) {
+    return { points: 0, coins: 0 }
+  }
+  return mapWalletBalanceRow(data as WalletBalanceRow)
+}
+
+export const listWalletQuests = async (status: 'open' | 'completed'): Promise<WalletQuest[]> => {
+  if (!supabase) {
+    return []
+  }
+  const userId = await requireAuthenticatedUserId()
+  const orderColumn = status === 'completed' ? 'completed_at' : 'created_at'
+  const { data, error } = await supabase
+    .from('quests')
+    .select('id,user_id,created_by,title,description,reward_points,status,completed_at,completed_note,created_at')
+    .eq('user_id', userId)
+    .eq('status', status)
+    .order(orderColumn, { ascending: false })
+    .order('created_at', { ascending: false })
+  if (error) {
+    throw error
+  }
+  return (data ?? []).map((row) => mapWalletQuestRow(row as WalletQuestRow))
+}
+
+export const createWalletQuest = async (payload: {
+  title: string
+  description: string
+  rewardPoints: number
+  createdBy: WalletQuestCreator
+}): Promise<void> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const userId = await requireAuthenticatedUserId()
+  const { error } = await supabase.from('quests').insert({
+    user_id: userId,
+    created_by: payload.createdBy,
+    title: payload.title,
+    description: payload.description.trim() ? payload.description : null,
+    reward_points: payload.rewardPoints,
+    status: 'open',
+  })
+  if (error) {
+    throw error
+  }
+}
+
+export const updateWalletQuest = async (
+  questId: string,
+  payload: { title: string; description: string; rewardPoints: number },
+): Promise<void> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const userId = await requireAuthenticatedUserId()
+  const { error } = await supabase
+    .from('quests')
+    .update({
+      title: payload.title,
+      description: payload.description.trim() ? payload.description : null,
+      reward_points: payload.rewardPoints,
+    })
+    .eq('id', questId)
+    .eq('user_id', userId)
+  if (error) {
+    throw error
+  }
+}
+
+export const completeWalletQuest = async (questId: string, note: string): Promise<void> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const { data, error } = await supabase.rpc('complete_quest', {
+    p_quest_id: questId,
+    p_note: note.trim() || undefined,
+  })
+  if (error) {
+    throw error
+  }
+  assertRpcSuccess('complete_quest', data)
+}
+
+export const exchangeWalletPointsToCoins = async (points: number): Promise<void> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const { data, error } = await supabase.rpc('exchange_points_to_coins', { p_points: points })
+  if (error) {
+    throw error
+  }
+  assertRpcSuccess('exchange_points_to_coins', data)
+}
+
+export const spendWalletCoins = async (amount: number, description: string): Promise<void> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const { data, error } = await supabase.rpc('spend_coins', {
+    p_amount: amount,
+    p_description: description,
+  })
+  if (error) {
+    throw error
+  }
+  assertRpcSuccess('spend_coins', data)
+}
+
+export const listWalletTransactions = async (): Promise<WalletTransaction[]> => {
+  if (!supabase) {
+    return []
+  }
+  const userId = await requireAuthenticatedUserId()
+  const { data, error } = await supabase
+    .from('wallet_transactions')
+    .select('id,type,points_delta,coins_delta,description,quest_id,created_at')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+  if (error) {
+    throw error
+  }
+  return (data ?? []).map((row) => mapWalletTransactionRow(row as WalletTransactionRow))
+}
+
+export const createTodayCheckin = async (checkinDate: string): Promise<'created' | 'already_checked_in'> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const userId = await requireAuthenticatedUserId()
+  const { error } = await supabase.from('checkins').insert({
+    user_id: userId,
+    checkin_date: checkinDate,
+  })
+  if (!error) {
+    return 'created'
+  }
+
+  if (error.code === '23505') {
+    return 'already_checked_in'
+  }
+  throw error
+}
+
+export const fetchRecentCheckins = async (limit = 60): Promise<CheckinEntry[]> => {
+  if (!supabase) {
+    return []
+  }
+  const userId = await requireAuthenticatedUserId()
+  const { data, error } = await supabase
+    .from('checkins')
+    .select('id,user_id,checkin_date,created_at')
+    .eq('user_id', userId)
+    .order('checkin_date', { ascending: false })
+    .limit(limit)
+  if (error) {
+    throw error
+  }
+  return (data ?? []).map((row) => mapCheckinRow(row as CheckinRow))
+}
+
+export const fetchCheckinTotalCount = async (): Promise<number> => {
+  if (!supabase) {
+    return 0
+  }
+  const userId = await requireAuthenticatedUserId()
+  const { count, error } = await supabase
+    .from('checkins')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', userId)
+  if (error) {
+    throw error
+  }
+  return count ?? 0
+}
+
+
+// --- Bubble Chat ---
+
+type BubbleSessionRow = {
+  id: string
+  user_id: string
+  session_date: string
+  created_at: string
+  updated_at: string
+}
+
+type BubbleMessageRow = {
+  id: string
+  session_id: string
+  user_id: string
+  role: 'user' | 'assistant'
+  content: string
+  created_at: string
+}
+
+const mapBubbleSessionRow = (row: BubbleSessionRow): BubbleSession => ({
+  id: row.id,
+  userId: row.user_id,
+  sessionDate: row.session_date,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+})
+
+const mapBubbleMessageRow = (row: BubbleMessageRow): BubbleMessage => ({
+  id: row.id,
+  sessionId: row.session_id,
+  userId: row.user_id,
+  role: row.role,
+  content: row.content,
+  createdAt: row.created_at,
+})
+
+export const resolveOrCreateBubbleSession = async (dateStr: string): Promise<BubbleSession> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const userId = await requireAuthenticatedUserId()
+
+  const { data: existing, error: fetchError } = await supabase
+    .from('bubble_sessions')
+    .select('id,user_id,session_date,created_at,updated_at')
+    .eq('user_id', userId)
+    .eq('session_date', dateStr)
+    .maybeSingle()
+
+  if (fetchError) {
+    throw fetchError
+  }
+
+  if (existing) {
+    return mapBubbleSessionRow(existing as BubbleSessionRow)
+  }
+
+  const now = new Date().toISOString()
+  const { data: created, error: insertError } = await supabase
+    .from('bubble_sessions')
+    .insert({
+      user_id: userId,
+      session_date: dateStr,
+      created_at: now,
+      updated_at: now,
+    })
+    .select('id,user_id,session_date,created_at,updated_at')
+    .single()
+
+  if (insertError) {
+    if (insertError.code === '23505') {
+      const { data: retry, error: retryError } = await supabase
+        .from('bubble_sessions')
+        .select('id,user_id,session_date,created_at,updated_at')
+        .eq('user_id', userId)
+        .eq('session_date', dateStr)
+        .single()
+      if (retryError || !retry) {
+        throw retryError ?? new Error('获取气泡聊天会话失败')
+      }
+      return mapBubbleSessionRow(retry as BubbleSessionRow)
+    }
+    throw insertError
+  }
+
+  if (!created) {
+    throw new Error('创建气泡聊天会话失败')
+  }
+  return mapBubbleSessionRow(created as BubbleSessionRow)
+}
+
+export const createBubbleMessage = async (
+  sessionId: string,
+  role: 'user' | 'assistant',
+  content: string,
+): Promise<BubbleMessage> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const userId = await requireAuthenticatedUserId()
+  const now = new Date().toISOString()
+  const { data, error } = await supabase
+    .from('bubble_messages')
+    .insert({
+      session_id: sessionId,
+      user_id: userId,
+      role,
+      content,
+      created_at: now,
+    })
+    .select('id,session_id,user_id,role,content,created_at')
+    .single()
+
+  if (error || !data) {
+    throw error ?? new Error('保存气泡聊天消息失败')
+  }
+
+  await supabase
+    .from('bubble_sessions')
+    .update({ updated_at: now })
+    .eq('id', sessionId)
+    .eq('user_id', userId)
+
+  const message = mapBubbleMessageRow(data as BubbleMessageRow)
+  return message
+}
+
+export const fetchAllBubbleSessions = async (): Promise<BubbleSession[]> => {
+  if (!supabase) {
+    return []
+  }
+  const userId = await requireAuthenticatedUserId()
+  const { data, error } = await supabase
+    .from('bubble_sessions')
+    .select('id,user_id,session_date,created_at,updated_at')
+    .eq('user_id', userId)
+    .order('session_date', { ascending: false })
+
+  if (error) {
+    throw error
+  }
+  return (data ?? []).map((row) => mapBubbleSessionRow(row as BubbleSessionRow))
+}
+
+export const fetchBubbleMessages = async (sessionId: string): Promise<BubbleMessage[]> => {
+  if (!supabase) {
+    return []
+  }
+  const userId = await requireAuthenticatedUserId()
+  const { data, error } = await supabase
+    .from('bubble_messages')
+    .select('id,session_id,user_id,role,content,created_at')
+    .eq('session_id', sessionId)
+    .eq('user_id', userId)
+    .order('created_at', { ascending: true })
+
+  if (error) {
+    throw error
+  }
+  return (data ?? []).map((row) => mapBubbleMessageRow(row as BubbleMessageRow))
+}
+
+// ── Story Groups ──────────────────────────────────────────────────────
+
+type StoryGroupRow = {
+  id: string
+  user_id: string
+  name: string
+  created_at: string
+  updated_at: string | null
+}
+
+type SessionGroupRow = {
+  id: string
+  session_id: string
+  story_group_id: string
+  created_at: string
+}
+
+const mapStoryGroupRow = (row: StoryGroupRow): RpStoryGroup => ({
+  id: row.id,
+  userId: row.user_id,
+  name: row.name,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+})
+
+const mapSessionGroupRow = (row: SessionGroupRow): RpSessionGroup => ({
+  id: row.id,
+  sessionId: row.session_id,
+  storyGroupId: row.story_group_id,
+  createdAt: row.created_at,
+})
+
+export const fetchStoryGroups = async (userId: string): Promise<RpStoryGroup[]> => {
+  if (!supabase) return []
+  const { data, error } = await supabase
+    .from('rp_story_groups')
+    .select('id,user_id,name,created_at,updated_at')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: true })
+  if (error) throw error
+  return (data ?? []).map((row) => mapStoryGroupRow(row as StoryGroupRow))
+}
+
+export const createStoryGroup = async (userId: string, name: string): Promise<RpStoryGroup> => {
+  if (!supabase) throw new Error('Supabase 客户端未配置')
+  const now = new Date().toISOString()
+  const { data, error } = await supabase
+    .from('rp_story_groups')
+    .insert({ user_id: userId, name, created_at: now })
+    .select('id,user_id,name,created_at,updated_at')
+    .single()
+  if (error || !data) throw error ?? new Error('创建故事组失败')
+  return mapStoryGroupRow(data as StoryGroupRow)
+}
+
+export const renameStoryGroup = async (groupId: string, name: string): Promise<void> => {
+  if (!supabase) return
+  const now = new Date().toISOString()
+  const { error } = await supabase
+    .from('rp_story_groups')
+    .update({ name, updated_at: now })
+    .eq('id', groupId)
+  if (error) throw error
+}
+
+export const deleteStoryGroup = async (groupId: string): Promise<void> => {
+  if (!supabase) return
+  const { error } = await supabase
+    .from('rp_story_groups')
+    .delete()
+    .eq('id', groupId)
+  if (error) throw error
+}
+
+export const fetchSessionGroups = async (_userId: string): Promise<RpSessionGroup[]> => {
+  void _userId
+  if (!supabase) return []
+  const { data, error } = await supabase
+    .from('rp_session_groups')
+    .select('id,session_id,story_group_id,created_at')
+  if (error) throw error
+  return (data ?? []).map((row) => mapSessionGroupRow(row as SessionGroupRow))
+}
+
+export const addSessionToGroup = async (sessionId: string, storyGroupId: string): Promise<RpSessionGroup> => {
+  if (!supabase) throw new Error('Supabase 客户端未配置')
+  const { data, error } = await supabase
+    .from('rp_session_groups')
+    .upsert(
+      { session_id: sessionId, story_group_id: storyGroupId, created_at: new Date().toISOString() },
+      { onConflict: 'session_id' },
+    )
+    .select('id,session_id,story_group_id,created_at')
+    .single()
+  if (error || !data) throw error ?? new Error('添加 session 到故事组失败')
+  return mapSessionGroupRow(data as SessionGroupRow)
+}
+
+export const removeSessionFromGroup = async (sessionId: string): Promise<void> => {
+  if (!supabase) return
+  const { error } = await supabase
+    .from('rp_session_groups')
+    .delete()
+    .eq('session_id', sessionId)
+  if (error) throw error
+}
+
+type NovelBookRow = { id:string; user_id:string; title:string; summary:string; status:'draft'|'serializing'|'completed'; outline:string; world_setting:string; characters: unknown; model_config: Record<string, unknown> | null; created_at:string; updated_at:string }
+type NovelChapterRow = { id:string; book_id:string; chapter_number:number; title:string; content:string; director_note:string; summary:string; status?:string|null; created_at:string; updated_at:string }
+
+const mapNovelBookRow = (row: NovelBookRow): NovelBook => ({ id: row.id, userId: row.user_id, title: row.title, summary: row.summary ?? '', status: row.status, outline: row.outline ?? '', worldSetting: row.world_setting ?? '', characters: Array.isArray(row.characters) ? row.characters as NovelCharacterCard[] : [], modelConfig: row.model_config ?? {}, createdAt: row.created_at, updatedAt: row.updated_at })
+const mapNovelChapterRow = (row: NovelChapterRow): NovelChapter => ({ id: row.id, bookId: row.book_id, chapterNumber: row.chapter_number, title: row.title, content: row.content ?? '', directorNote: row.director_note ?? '', summary: row.summary ?? '', status: row.status === 'published' ? 'published' : 'draft', createdAt: row.created_at, updatedAt: row.updated_at })
+
+export const listNovelBooks = async (userId: string): Promise<NovelBook[]> => { if (!supabase) return []; const {data,error}= await supabase.from('novel_books').select('*').eq('user_id', userId).order('updated_at',{ascending:false}); if(error) throw error; return (data??[] as NovelBookRow[]).map((r)=>mapNovelBookRow(r as NovelBookRow)) }
+export const createNovelBook = async (payload: { userId:string; title:string; summary:string; status:'draft'|'serializing'|'completed'; outline:string; worldSetting:string; characters: NovelCharacterCard[]; modelConfig: Record<string, unknown> }): Promise<NovelBook> => { if (!supabase) throw new Error('Supabase 客户端未配置'); const now=new Date().toISOString(); const {data,error}=await supabase.from('novel_books').insert({user_id:payload.userId,title:payload.title,summary:payload.summary,status:payload.status,outline:payload.outline,world_setting:payload.worldSetting,characters:payload.characters as unknown as Json,model_config:payload.modelConfig as Json,created_at:now,updated_at:now}).select('*').single(); if(error||!data) throw error ?? new Error('创建失败'); return mapNovelBookRow(data as NovelBookRow) }
+export const updateNovelBookModelConfig = async (bookId:string, modelConfig: Record<string, unknown>): Promise<void> => { if (!supabase) throw new Error('Supabase 客户端未配置'); const userId = await requireAuthenticatedUserId(); const {error}=await supabase.from('novel_books').update({model_config:modelConfig as Json,updated_at:new Date().toISOString()}).eq('id',bookId).eq('user_id',userId); if(error) throw error }
+export const updateNovelBookMeta = async (bookId:string, updates:{ title?: string; summary?:string; outline?:string; worldSetting?:string; characters?:NovelCharacterCard[] }): Promise<NovelBook> => { if (!supabase) throw new Error('Supabase 客户端未配置'); const userId = await requireAuthenticatedUserId(); const patch: Record<string, unknown> = { updated_at: new Date().toISOString() }; if (typeof updates.title !== 'undefined') patch.title = updates.title; if (typeof updates.summary !== 'undefined') patch.summary = updates.summary; if (typeof updates.outline !== 'undefined') patch.outline = updates.outline; if (typeof updates.worldSetting !== 'undefined') patch.world_setting = updates.worldSetting; if (typeof updates.characters !== 'undefined') patch.characters = updates.characters; const {data,error}=await supabase.from('novel_books').update(patch).eq('id',bookId).eq('user_id',userId).select('*').single(); if(error||!data) throw error ?? new Error('更新失败'); return mapNovelBookRow(data as NovelBookRow) }
+export const listNovelChaptersByBookId = async (bookId: string): Promise<NovelChapter[]> => { if (!supabase) return []; const {data,error}=await supabase.from('novel_chapters').select('*').eq('book_id',bookId).order('chapter_number',{ascending:true}); if(error) throw error; return (data??[] as NovelChapterRow[]).map((r)=>mapNovelChapterRow(r as NovelChapterRow)) }
+export const createNovelChapter = async (payload:{ bookId:string; chapterNumber:number; title:string; content:string; directorNote:string; summary:string }): Promise<NovelChapter> => { if (!supabase) throw new Error('Supabase 客户端未配置'); const now=new Date().toISOString(); const {data,error}=await supabase.from('novel_chapters').insert({book_id:payload.bookId,chapter_number:payload.chapterNumber,title:payload.title,content:payload.content,director_note:payload.directorNote,summary:payload.summary,created_at:now,updated_at:now}).select('*').single(); if(error||!data) throw error ?? new Error('创建章节失败'); return mapNovelChapterRow(data as NovelChapterRow) }
+export const updateNovelChapter = async (chapterId:string, updates:{ content?:string; directorNote?:string; summary?:string; status?:'draft'|'published' }): Promise<NovelChapter> => { if (!supabase) throw new Error('Supabase 客户端未配置'); const patch: Record<string, unknown> = {updated_at:new Date().toISOString()}; if(typeof updates.content !== 'undefined') patch.content = updates.content; if(typeof updates.directorNote !== 'undefined') patch.director_note = updates.directorNote; if(typeof updates.summary !== 'undefined') patch.summary = updates.summary; if(typeof updates.status !== 'undefined') patch.status = updates.status; const {data,error}=await supabase.from('novel_chapters').update(patch).eq('id',chapterId).select('*').single(); if(error||!data) throw error ?? new Error('更新章节失败'); return mapNovelChapterRow(data as NovelChapterRow) }
+
+
+// ── System Archive (系统档案) ─────────────────────────────
+
+type ArchiveCategoryRow = {
+  id: string
+  user_id: string
+  parent_id: string | null
+  scope: string
+  name: string
+  sort_order: number | null
+  created_at: string
+  updated_at: string
+}
+
+type ArchiveRow = {
+  id: string
+  user_id: string
+  category_id: string
+  title: string
+  content: string
+  keywords: string[] | null
+  aliases: string[] | null
+  importance: string | null
+  source: string | null
+  is_deleted: boolean | null
+  created_at: string
+  updated_at: string
+}
+
+const ARCHIVE_IMPORTANCE_VALUES: ArchiveImportance[] = ['low', 'normal', 'high', 'critical']
+
+const normalizeArchiveScope = (scope: string): ArchiveScope =>
+  scope === 'syzygy' ? 'syzygy' : 'chuanchuan'
+
+const normalizeArchiveImportance = (importance: string | null): ArchiveImportance =>
+  (ARCHIVE_IMPORTANCE_VALUES as string[]).includes(importance ?? '')
+    ? (importance as ArchiveImportance)
+    : 'normal'
+
+const mapArchiveCategoryRow = (row: ArchiveCategoryRow): ArchiveCategory => ({
+  id: row.id,
+  userId: row.user_id,
+  parentId: row.parent_id,
+  scope: normalizeArchiveScope(row.scope),
+  name: row.name,
+  sortOrder: row.sort_order ?? 0,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+})
+
+const mapArchiveRow = (row: ArchiveRow): Archive => ({
+  id: row.id,
+  userId: row.user_id,
+  categoryId: row.category_id,
+  title: row.title,
+  content: row.content ?? '',
+  keywords: Array.isArray(row.keywords) ? row.keywords : [],
+  aliases: Array.isArray(row.aliases) ? row.aliases : [],
+  importance: normalizeArchiveImportance(row.importance),
+  source: row.source ?? 'manual',
+  isDeleted: row.is_deleted ?? false,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+})
+
+const ARCHIVE_CATEGORY_COLUMNS = 'id,user_id,parent_id,scope,name,sort_order,created_at,updated_at'
+const ARCHIVE_COLUMNS =
+  'id,user_id,category_id,title,content,keywords,aliases,importance,source,is_deleted,created_at,updated_at'
+
+export const listArchiveCategories = async (scope: ArchiveScope): Promise<ArchiveCategory[]> => {
+  if (!supabase) {
+    return []
+  }
+  const userId = await requireAuthenticatedUserId()
+  const { data, error } = await supabase
+    .from('archive_categories')
+    .select(ARCHIVE_CATEGORY_COLUMNS)
+    .eq('user_id', userId)
+    .eq('scope', scope)
+    .order('sort_order', { ascending: true })
+    .order('created_at', { ascending: true })
+  if (error) {
+    throw error
+  }
+  return (data ?? []).map((row) => mapArchiveCategoryRow(row as ArchiveCategoryRow))
+}
+
+export const createArchiveCategory = async (payload: {
+  scope: ArchiveScope
+  name: string
+  parentId: string | null
+  sortOrder?: number
+}): Promise<ArchiveCategory> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const userId = await requireAuthenticatedUserId()
+  const { data, error } = await supabase
+    .from('archive_categories')
+    .insert({
+      user_id: userId,
+      scope: payload.scope,
+      name: payload.name,
+      parent_id: payload.parentId,
+      sort_order: payload.sortOrder ?? 0,
+    })
+    .select(ARCHIVE_CATEGORY_COLUMNS)
+    .single()
+  if (error || !data) {
+    throw error ?? new Error('创建目录失败')
+  }
+  return mapArchiveCategoryRow(data as ArchiveCategoryRow)
+}
+
+export const renameArchiveCategory = async (categoryId: string, name: string): Promise<void> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const userId = await requireAuthenticatedUserId()
+  const { error } = await supabase
+    .from('archive_categories')
+    .update({ name, updated_at: new Date().toISOString() })
+    .eq('id', categoryId)
+    .eq('user_id', userId)
+  if (error) {
+    throw error
+  }
+}
+
+// Hard delete: DB cascades to child categories and their archives.
+export const deleteArchiveCategory = async (categoryId: string): Promise<void> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const userId = await requireAuthenticatedUserId()
+  const { error } = await supabase
+    .from('archive_categories')
+    .delete()
+    .eq('id', categoryId)
+    .eq('user_id', userId)
+  if (error) {
+    throw error
+  }
+}
+
+export const listArchives = async (categoryId: string): Promise<Archive[]> => {
+  if (!supabase) {
+    return []
+  }
+  const userId = await requireAuthenticatedUserId()
+  const { data, error } = await supabase
+    .from('archives')
+    .select(ARCHIVE_COLUMNS)
+    .eq('user_id', userId)
+    .eq('category_id', categoryId)
+    .eq('is_deleted', false)
+    .order('updated_at', { ascending: false })
+  if (error) {
+    throw error
+  }
+  return (data ?? []).map((row) => mapArchiveRow(row as ArchiveRow))
+}
+
+export const createArchive = async (payload: {
+  categoryId: string
+  title: string
+  content: string
+  keywords: string[]
+  aliases: string[]
+  importance: ArchiveImportance
+  source?: string
+}): Promise<Archive> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const userId = await requireAuthenticatedUserId()
+  const { data, error } = await supabase
+    .from('archives')
+    .insert({
+      user_id: userId,
+      category_id: payload.categoryId,
+      title: payload.title,
+      content: payload.content,
+      keywords: payload.keywords,
+      aliases: payload.aliases,
+      importance: payload.importance,
+      source: payload.source ?? 'manual',
+    })
+    .select(ARCHIVE_COLUMNS)
+    .single()
+  if (error || !data) {
+    throw error ?? new Error('创建档案失败')
+  }
+  return mapArchiveRow(data as ArchiveRow)
+}
+
+export const updateArchive = async (
+  archiveId: string,
+  payload: {
+    categoryId?: string
+    title: string
+    content: string
+    keywords: string[]
+    aliases: string[]
+    importance: ArchiveImportance
+  },
+): Promise<Archive> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const userId = await requireAuthenticatedUserId()
+  const patch: Record<string, unknown> = {
+    title: payload.title,
+    content: payload.content,
+    keywords: payload.keywords,
+    aliases: payload.aliases,
+    importance: payload.importance,
+    updated_at: new Date().toISOString(),
+  }
+  if (typeof payload.categoryId !== 'undefined') {
+    patch.category_id = payload.categoryId
+  }
+  const { data, error } = await supabase
+    .from('archives')
+    .update(patch)
+    .eq('id', archiveId)
+    .eq('user_id', userId)
+    .select(ARCHIVE_COLUMNS)
+    .single()
+  if (error || !data) {
+    throw error ?? new Error('更新档案失败')
+  }
+  return mapArchiveRow(data as ArchiveRow)
+}
+
+export const softDeleteArchive = async (archiveId: string): Promise<void> => {
+  if (!supabase) {
+    throw new Error('Supabase 客户端未配置')
+  }
+  const userId = await requireAuthenticatedUserId()
+  const { error } = await supabase
+    .from('archives')
+    .update({ is_deleted: true, updated_at: new Date().toISOString() })
+    .eq('id', archiveId)
+    .eq('user_id', userId)
+  if (error) {
+    throw error
+  }
+}

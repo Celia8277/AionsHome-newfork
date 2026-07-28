@@ -1,0 +1,7 @@
+<resources>
+  <string name="app_name">YSClaude</string>
+  <string name="ysclaude_ime_label">YSClaude IME</string>
+  <string name="share_into_scheme" translatable="false">ysclaude</string>
+  <string name="accessibility_service_description">允许 YSClaude 读取当前屏幕结构并按需截图，用于把当前手机界面发送给 AI。</string>
+  <string name="expo_system_ui_user_interface_style" translatable="false">automatic</string>
+</resources>

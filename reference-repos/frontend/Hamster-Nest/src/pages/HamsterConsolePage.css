@@ -1,0 +1,1031 @@
+.hamster-console-page {
+  min-height: 100%;
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 14px 14px calc(1.5rem + env(safe-area-inset-bottom));
+  color: #3f3540;
+  display: grid;
+  gap: 12px;
+  align-content: start;
+  position: relative;
+  isolation: isolate;
+  /* Direct flex child of .app-shell: keep natural content height so the
+     ::before background card grows with expanded accordions instead of being
+     clamped to one viewport. */
+  flex-shrink: 0;
+}
+
+.hamster-console-page::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at 8% 2%, rgba(255, 214, 231, 0.35), transparent 42%),
+    radial-gradient(circle at 92% 0%, rgba(255, 239, 246, 0.82), transparent 54%),
+    linear-gradient(180deg, rgba(255, 252, 254, 0.96) 0%, rgba(253, 245, 249, 0.96) 100%);
+}
+
+.hamster-console-page__header {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 0.3rem;
+  padding: 12px;
+  border: 1px solid rgba(255, 214, 231, 0.85);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 8px 18px rgba(255, 214, 231, 0.24);
+  min-height: 80px;
+}
+
+.hamster-console-page__title-wrap {
+  display: grid;
+  gap: 2px;
+  text-align: center;
+  min-width: 0;
+}
+
+.hamster-console-page__kicker {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #b27f98;
+}
+
+.hamster-console-page__header h1 {
+  margin: 0;
+  font-size: clamp(1.35rem, 5vw, 1.85rem);
+  color: #68485e;
+}
+
+.hamster-console-page__header p {
+  margin: 0;
+  color: #8b7182;
+  font-size: 0.9rem;
+  text-align: center;
+}
+
+.hamster-console-page__back {
+  position: absolute;
+  top: 50%;
+  left: 12px;
+  transform: translateY(-50%);
+  width: fit-content;
+  text-decoration: none;
+  color: #7d5d70;
+  font-weight: 700;
+  border-radius: 999px;
+  border: 1px solid #ffd6e7;
+  background: #fff;
+  padding: 6px 12px;
+}
+
+.hamster-console-alert,
+.hamster-console-toast,
+.hamster-console-loading {
+  border-radius: 12px;
+  padding: 9px 11px;
+  margin: 0;
+  border: 1px solid;
+  font-size: 0.84rem;
+  background: #fff;
+}
+
+.hamster-console-alert {
+  color: #b13f4d;
+  border-color: rgba(255, 181, 192, 0.7);
+}
+
+.hamster-console-toast {
+  color: #2f7a56;
+  border-color: rgba(126, 211, 167, 0.54);
+}
+
+.hamster-console-loading {
+  color: #6b7280;
+  border-color: rgba(255, 214, 231, 0.68);
+}
+
+.hamster-console-accordion {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.hamster-console-card {
+  display: grid;
+  gap: 0.6rem;
+  border: 1px solid rgba(255, 214, 231, 0.88);
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 10px 20px rgba(255, 214, 231, 0.2);
+}
+
+.hamster-console-accordion__header {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.8rem 0.95rem;
+  text-align: left;
+}
+
+.hamster-console-accordion__header h2 {
+  margin: 0;
+  font-size: 1.03rem;
+  color: #66485d;
+}
+
+.hamster-console-accordion__header span {
+  color: #aa6f8d;
+  font-weight: 700;
+}
+
+.hamster-console-accordion__content {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 280ms ease;
+}
+
+.hamster-console-accordion__content.expanded {
+  max-height: 1900px;
+}
+
+.hamster-console-accordion__inner {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0 0.95rem 0.95rem;
+}
+
+.hamster-console-card__hint {
+  margin: 0;
+  color: #8b7284;
+  font-size: 0.84rem;
+}
+
+.hamster-console-codex-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: fit-content;
+  padding: 0.42rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 214, 231, 0.65);
+  background: rgba(255, 245, 250, 0.75);
+  color: #74596c;
+  font-weight: 600;
+}
+
+.hamster-console-codex-dot {
+  width: 0.62rem;
+  height: 0.62rem;
+  border-radius: 50%;
+}
+
+.hamster-console-codex-dot.green { background: #26b673; }
+.hamster-console-codex-dot.gray { background: #a8a9b3; }
+.hamster-console-codex-dot.yellow { background: #f1ba3b; }
+
+.hamster-console-codex-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+/* CLI Syzygy Runtime 区域：与上方 Codex 按钮用分隔线和柔色边框区分，避免串串误点 */
+.hamster-cli-runtime {
+  margin-top: 0.9rem;
+  padding-top: 0.9rem;
+  border-top: 1px dashed rgba(255, 198, 222, 0.7);
+  display: grid;
+  gap: 0.6rem;
+}
+
+.hamster-cli-runtime__head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.hamster-cli-runtime__head h3 {
+  margin: 0;
+  font-size: 0.98rem;
+  color: #74596c;
+}
+
+.hamster-cli-runtime__tag {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #a87fa0;
+  padding: 0.18rem 0.5rem;
+  border-radius: 999px;
+  background: rgba(255, 240, 248, 0.85);
+  border: 1px solid rgba(255, 214, 231, 0.65);
+}
+
+.hamster-cli-runtime__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.hamster-cli-runtime__btn {
+  flex: 1 1 auto;
+  min-width: 140px;
+  padding: 0.55rem 0.9rem;
+  border-radius: 16px;
+  border: 1px solid rgba(214, 170, 224, 0.7);
+  background: linear-gradient(135deg, #fde6f4 0%, #ece4fb 100%);
+  color: #6a4f78;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.12s ease, opacity 0.12s ease;
+}
+
+.hamster-cli-runtime__btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(206, 162, 224, 0.35);
+}
+
+.hamster-cli-runtime__btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.hamster-cli-runtime__feedback {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 0.42rem 0.65rem;
+  border-radius: 12px;
+  width: fit-content;
+  max-width: 100%;
+}
+
+.hamster-cli-runtime__feedback.success {
+  color: #1f7b4f;
+  background: #e7fbf0;
+  border: 1px solid rgba(38, 182, 115, 0.3);
+}
+
+.hamster-cli-runtime__feedback.error {
+  color: #b13f4d;
+  background: #ffe6ea;
+  border: 1px solid rgba(177, 63, 77, 0.3);
+}
+
+.hamster-cli-runtime__recent {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.hamster-cli-runtime__recent-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #74596c;
+}
+
+.hamster-cli-runtime__refresh {
+  border: none;
+  background: transparent;
+  color: #a87fa0;
+  font-weight: 600;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.hamster-cli-runtime__refresh:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.hamster-cli-runtime__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.hamster-cli-runtime__item {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr) auto auto;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: 12px;
+  background: rgba(255, 245, 250, 0.76);
+  border: 1px solid rgba(255, 214, 231, 0.56);
+  font-size: 0.8rem;
+}
+
+.hamster-cli-runtime__role {
+  font-weight: 700;
+  color: #6a4f78;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hamster-cli-runtime__type {
+  color: #9a8aa2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hamster-cli-runtime__time {
+  color: #9a8aa2;
+  white-space: nowrap;
+}
+
+@media (max-width: 520px) {
+  .hamster-cli-runtime__item {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.hamster-console-channel-list {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.hamster-console-model-add {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.55rem;
+}
+
+.hamster-console-model-add > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.hamster-console-channel-row {
+  display: grid;
+  grid-template-columns: 90px 1fr auto;
+  gap: 0.55rem;
+  align-items: center;
+  padding: 8px;
+  border-radius: 12px;
+  background: rgba(255, 245, 250, 0.76);
+  border: 1px solid rgba(255, 214, 231, 0.56);
+}
+
+.hamster-console-channel-title {
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #7a5e6f;
+  font-size: 0.78rem;
+}
+
+.hamster-console-toggle {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: rgba(255, 245, 250, 0.72);
+  border: 1px solid rgba(255, 214, 231, 0.48);
+}
+
+.hamster-toggle {
+  border: 1px solid #f3c0d8;
+  border-radius: 999px;
+  background: #fff;
+  padding: 0.3rem 0.8rem;
+  cursor: pointer;
+  color: #7a5f70;
+  font-weight: 600;
+}
+
+.hamster-toggle.enabled {
+  background: linear-gradient(180deg, #ffeef6 0%, #ffe1ef 100%);
+  border-color: #f5b3d2;
+  color: #68485e;
+}
+
+.hamster-console-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(120px, 1fr));
+  gap: 0.6rem;
+}
+
+.hamster-console-input {
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+  color: #80697a;
+}
+
+.hamster-console-json,
+.hamster-console-template-editor {
+  width: 100%;
+  resize: vertical;
+}
+
+.hamster-console-template-list {
+  display: flex;
+  gap: 0.5rem;
+  overflow-x: auto;
+  padding-bottom: 0.25rem;
+}
+
+.hamster-template-item {
+  border: 1px solid #ffd6e7;
+  border-radius: 12px;
+  background: #fff;
+  padding: 0.52rem 0.68rem;
+  min-width: 128px;
+  text-align: left;
+  display: grid;
+  gap: 0.16rem;
+  cursor: pointer;
+  color: #68485e;
+}
+
+.hamster-template-item.active {
+  border-color: #f29cc3;
+  background: linear-gradient(180deg, #ffdeec 0%, #ffd2e8 100%);
+  box-shadow: 0 4px 10px rgba(255, 185, 216, 0.35);
+}
+
+.hamster-template-item small {
+  color: #9a7087;
+}
+
+.hamster-console-template-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.84rem;
+  color: #7b6072;
+}
+
+.hamster-console-section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.hamster-console-command-list {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.hamster-command-item {
+  border: 1px solid rgba(255, 214, 231, 0.76);
+  border-radius: 14px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.86);
+}
+
+.hamster-command-header {
+  width: 100%;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  padding: 0.62rem;
+  display: grid;
+  gap: 0.3rem;
+  grid-template-columns: 1.1fr auto auto auto;
+  align-items: center;
+  color: #6f5164;
+}
+
+.hamster-command-status {
+  border-radius: 999px;
+  padding: 0.15rem 0.45rem;
+  font-size: 0.78rem;
+}
+
+.hamster-command-status.pending { background: #fff3db; color: #9a5d13; }
+.hamster-command-status.running { background: #ebf3ff; color: #315eb8; }
+.hamster-command-status.done { background: #e7fbf0; color: #1f7b4f; }
+.hamster-command-status.failed { background: #ffe6ea; color: #b13f4d; }
+
+.hamster-command-body {
+  padding: 0.24rem 0.62rem 0.72rem;
+}
+
+.hamster-command-body h4 {
+  margin: 0.35rem 0;
+  font-size: 0.82rem;
+  color: #8b6f81;
+}
+
+.hamster-command-body pre {
+  margin: 0;
+  background: #2a1f2b;
+  color: #fdf7fb;
+  border-radius: 10px;
+  padding: 0.55rem;
+  overflow: auto;
+  font-size: 0.74rem;
+}
+
+@media (max-width: 680px) {
+  .hamster-console-page {
+    padding: 12px 10px calc(1.2rem + env(safe-area-inset-bottom));
+  }
+
+  .hamster-console-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .hamster-console-channel-row,
+  .hamster-command-header,
+  .hamster-console-section-title {
+    grid-template-columns: 1fr;
+  }
+
+  .hamster-console-section-title {
+    display: grid;
+  }
+}
+
+.hamster-console-status-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
+.hamster-status-card,
+.hamster-mini-card,
+.hamster-v3-detail {
+  border: 1px solid rgba(255, 214, 231, 0.78);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: 0 8px 16px rgba(255, 214, 231, 0.16);
+}
+
+.hamster-status-card {
+  display: grid;
+  gap: 0.46rem;
+  padding: 1rem;
+  min-height: 118px;
+  min-width: 0;
+  align-content: space-between;
+  position: relative;
+  overflow: hidden;
+}
+
+.hamster-status-card span,
+.hamster-status-card small,
+.hamster-mini-card small,
+.hamster-mini-card em,
+.hamster-v3-detail small {
+  color: #8b7284;
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+
+.hamster-status-card strong {
+  color: #68485e;
+  font-size: clamp(1.05rem, 2.5vw, 1.32rem);
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.hamster-filter {
+  max-width: 240px;
+}
+
+.hamster-digest-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.hamster-mini-card,
+.hamster-v3-detail {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.68rem;
+  color: #6f5164;
+}
+
+.hamster-mini-card p,
+.hamster-v3-detail p {
+  margin: 0;
+  color: #755d6f;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.hamster-mini-card em {
+  font-style: normal;
+}
+
+.hamster-v3-detail pre {
+  margin: 0;
+  background: #2a1f2b;
+  color: #fdf7fb;
+  border-radius: 10px;
+  padding: 0.55rem;
+  overflow: auto;
+  font-size: 0.74rem;
+}
+
+.hamster-command-status.completed,
+.hamster-command-status.printed,
+.hamster-command-status.queued { background: #e7fbf0; color: #1f7b4f; }
+.hamster-command-status.cancelled,
+.hamster-command-status.draft { background: #f0edf2; color: #6b6170; }
+
+@media (max-width: 760px) {
+  .hamster-console-status-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 680px) {
+  .hamster-digest-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.hamster-console-accordion__header small {
+  display: block;
+  margin-top: 0.18rem;
+  color: #a27d92;
+  font-size: 0.76rem;
+  font-weight: 500;
+}
+
+.hamster-console-accordion__content.expanded {
+  max-height: none;
+  overflow: visible;
+}
+
+.hamster-console-group > .hamster-console-accordion__content > .hamster-console-accordion__inner {
+  padding-top: 0.1rem;
+}
+
+.hamster-console-nested-stack {
+  gap: 0.7rem;
+}
+
+.hamster-console-nested-stack > .hamster-console-card {
+  box-shadow: none;
+  background: rgba(255, 250, 253, 0.72);
+}
+
+.hamster-status-card::after {
+  content: '';
+  position: absolute;
+  inset: auto -24px -30px auto;
+  width: 86px;
+  height: 86px;
+  border-radius: 999px;
+  background: rgba(255, 226, 239, 0.55);
+}
+
+.hamster-status-card__topline {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.hamster-status-card__topline > span:first-child:not(.hamster-console-codex-dot) {
+  color: #8b7284;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.hamster-status-card__icon {
+  margin-left: auto;
+  width: 1.9rem;
+  height: 1.9rem;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 999px;
+  background: #fff4fa;
+  color: #b76f91;
+  border: 1px solid rgba(255, 214, 231, 0.86);
+  font-size: 1rem;
+  z-index: 1;
+}
+
+.hamster-status-card--agent { background: linear-gradient(135deg, rgba(255,255,255,.95), rgba(241,255,248,.86)); }
+.hamster-status-card--runner { background: linear-gradient(135deg, rgba(255,255,255,.95), rgba(244,248,255,.9)); }
+.hamster-status-card--queue { background: linear-gradient(135deg, rgba(255,255,255,.95), rgba(255,248,239,.9)); }
+.hamster-status-card--tasks { background: linear-gradient(135deg, rgba(255,255,255,.95), rgba(255,244,250,.92)); }
+.hamster-status-card.warning { border-color: rgba(236, 98, 119, 0.55); box-shadow: 0 8px 18px rgba(236, 98, 119, 0.14); }
+
+@media (max-width: 520px) {
+  .hamster-console-status-grid {
+    gap: 0.6rem;
+  }
+
+  .hamster-status-card {
+    min-height: 104px;
+    padding: 0.8rem;
+  }
+}
+
+.hamster-console-page,
+.hamster-console-page *,
+.hamster-console-page *::before,
+.hamster-console-page *::after {
+  box-sizing: border-box;
+}
+
+.hamster-console-page__header {
+  padding-left: clamp(88px, 18vw, 128px);
+  padding-right: clamp(88px, 18vw, 128px);
+  grid-template-columns: minmax(0, 1fr);
+  height: auto;
+  min-height: 96px;
+  align-content: center;
+}
+
+.hamster-console-page__header h1 {
+  line-height: 1.2;
+  padding-bottom: 2px;
+}
+
+.hamster-console-page__header > p {
+  width: 100%;
+  max-width: 430px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.35;
+}
+
+.hamster-console-card,
+.hamster-console-accordion,
+.hamster-console-accordion__inner,
+.hamster-console-nested-stack,
+.hamster-console-command-list,
+.hamster-console-channel-list {
+  min-width: 0;
+  width: 100%;
+}
+
+.hamster-console-card,
+.hamster-console-group,
+.hamster-console-nested-stack {
+  overflow: visible;
+}
+
+.hamster-console-accordion__header {
+  min-height: 58px;
+}
+
+@media (max-width: 560px) {
+  .hamster-console-page__header {
+    padding: 12px;
+    padding-top: 48px;
+  }
+
+  .hamster-console-page__back {
+    top: 10px;
+    left: 12px;
+    transform: none;
+  }
+}
+
+.hamster-feed-moved-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  padding: 0.85rem 1rem;
+  margin-bottom: 0.75rem;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 214, 231, 0.85);
+  background: linear-gradient(180deg, rgba(255, 245, 250, 0.95) 0%, rgba(255, 233, 244, 0.95) 100%);
+}
+
+.hamster-feed-moved-banner > span {
+  font-size: 1.5rem;
+  flex-shrink: 0;
+}
+
+.hamster-feed-moved-banner div {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+.hamster-feed-moved-banner strong {
+  display: block;
+  color: #68485e;
+  font-size: 0.95rem;
+}
+
+.hamster-feed-moved-banner p {
+  margin: 0.2rem 0 0;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: #8a6a7d;
+}
+
+.hamster-feed-moved-banner__link {
+  flex-shrink: 0;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.hamster-feed-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.hamster-feed-filter {
+  border: 1px solid rgba(255, 214, 231, 0.85);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.88);
+  color: #8b5f77;
+  cursor: pointer;
+  font-weight: 700;
+  padding: 0.42rem 0.7rem;
+}
+
+.hamster-feed-filter.active {
+  background: linear-gradient(135deg, #ff8db8, #ffb3cf);
+  border-color: rgba(255, 141, 184, 0.9);
+  color: #fff;
+  box-shadow: 0 8px 16px rgba(255, 141, 184, 0.22);
+}
+
+.hamster-feed-list {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.hamster-feed-card {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.78rem;
+  border: 1px solid rgba(255, 214, 231, 0.86);
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(255, 248, 251, 0.94));
+  box-shadow: 0 8px 18px rgba(255, 214, 231, 0.2);
+}
+
+.hamster-feed-card.pinned {
+  border-color: rgba(255, 174, 207, 0.95);
+  box-shadow: 0 10px 22px rgba(255, 174, 207, 0.26);
+}
+
+.hamster-feed-card.priority-urgent {
+  border-color: rgba(244, 99, 125, 0.72);
+}
+
+.hamster-feed-card.priority-high {
+  border-color: rgba(255, 172, 96, 0.72);
+}
+
+.hamster-feed-card.archived,
+.hamster-feed-card.expired {
+  opacity: 0.72;
+}
+
+.hamster-feed-card__header {
+  align-items: flex-start;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  gap: 0.75rem;
+  justify-content: space-between;
+  padding: 0;
+  text-align: left;
+  width: 100%;
+}
+
+.hamster-feed-card__title-block {
+  display: grid;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.hamster-feed-card__title-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.hamster-feed-card__title-row strong {
+  color: #66485d;
+  font-size: 1rem;
+}
+
+.hamster-feed-card__title-block p {
+  color: #826a7b;
+  font-size: 0.88rem;
+  margin: 0;
+}
+
+.hamster-feed-meta-row {
+  align-items: center;
+  color: #9a7a8d;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 0.78rem;
+  gap: 0.4rem;
+}
+
+.hamster-feed-pill {
+  border: 1px solid rgba(255, 214, 231, 0.78);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.82);
+  color: #8a6078;
+  font-size: 0.74rem;
+  font-weight: 700;
+  padding: 0.18rem 0.5rem;
+}
+
+.hamster-feed-pill.pinned,
+.hamster-feed-pill.priority.high {
+  background: #fff2df;
+  border-color: #ffd39a;
+  color: #a65f20;
+}
+
+.hamster-feed-pill.priority.urgent {
+  background: #ffe6ea;
+  border-color: #ff9eb0;
+  color: #b13f4d;
+}
+
+.hamster-feed-pill.priority.low {
+  color: #9f91a0;
+}
+
+.hamster-feed-pill.status.unread {
+  background: #fff0f7;
+  color: #b24f82;
+}
+
+.hamster-feed-pill.status.read {
+  background: #effaf5;
+  border-color: #bfe8d5;
+  color: #327a58;
+}
+
+.hamster-feed-pill.status.archived,
+.hamster-feed-pill.status.expired {
+  background: #f4f1f3;
+  color: #827681;
+}
+
+.hamster-feed-card__body {
+  border-top: 1px dashed rgba(255, 214, 231, 0.9);
+  display: grid;
+  gap: 0.55rem;
+  padding-top: 0.65rem;
+}
+
+.hamster-feed-content {
+  color: #4f3f4a;
+  font-size: 0.92rem;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.hamster-feed-content p {
+  margin: 0 0 0.55rem;
+  white-space: pre-wrap;
+}
+
+.hamster-feed-content pre,
+.hamster-feed-metadata {
+  background: rgba(255, 246, 250, 0.96);
+  border: 1px solid rgba(255, 214, 231, 0.72);
+  border-radius: 12px;
+  color: #5f4657;
+  font-size: 0.78rem;
+  margin: 0;
+  overflow: auto;
+  padding: 0.7rem;
+}
+
+.hamster-feed-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.hamster-console-accordion__content.expanded {
+  max-height: 6200px;
+}

@@ -1,0 +1,3770 @@
+import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react';
+import { View, Text, StyleSheet, Pressable, Image, Alert, TextInput, Modal, Dimensions, ScrollView, ActivityIndicator, Animated, Easing, type ImageStyle, type StyleProp, type TextStyle, type ViewStyle } from 'react-native';
+import { NativeViewGestureHandler, ScrollView as GestureScrollView } from 'react-native-gesture-handler';
+import Markdown from '@ronradtke/react-native-markdown-display';
+import * as Clipboard from 'expo-clipboard';
+import { createAudioPlayer, type AudioStatus } from 'expo-audio';
+import Svg, { Path } from 'react-native-svg';
+import { Message, type GeneratedPicture, type LocationAttachment, type ToolInvocation, type VoiceAttachment } from '../types';
+import { lightColors, useThemeColors, type ThemeColors } from '../theme/colors';
+import { fonts, fontWeights } from '../theme/fonts';
+import { TIKTOK_SANS_REGULAR } from '../theme/interfaceFonts';
+import { useChatStore } from '../stores/chat';
+import { useSettingsStore } from '../stores/settings';
+import { getTTSConfigMissingMessage, isTTSConfigReady, playTTSAndWait } from '../services/tts';
+import { saveGeneratedImageToLibrary } from '../services/imageGeneration';
+import { openWebView } from '../services/webviewController';
+import { getToolLabel } from '../services/tools';
+import { StickerContent } from './StickerContent';
+import { AppearanceBlurView } from './AppearanceBlurView';
+import { buildStickerDefinitions, getStickerByName, hasStickerToken, isStickerOnlyContent, type StickerDefinition } from '../utils/stickers';
+import { formatSmartTime } from '../utils/time';
+import { getLinkCardInfo, getSingleHttpUrlMessage } from '../utils/sharedLinks';
+import { parseDailyPaperCardMessage, type DailyPaperCardPayload } from '../utils/dailyPaperShare';
+import {
+  getAppearanceCssStyle,
+  getAppearanceGlassConfig,
+  parseAppearanceCss,
+  withoutAppearanceGlassProps,
+} from '../utils/appearanceCss';
+import { MarkdownCodeBlock } from './MarkdownCodeBlock';
+import { LatexMarkdownNode, latexMarkdownIt } from './LatexMarkdown';
+import { isMessageFavorite, setMessageFavorite } from '../db/operations';
+import { buildReactionMap, type MessageReactionActor, type MessageReactionEvent } from '../services/messageReactions';
+import {
+  DEFAULT_NEGATIVE_REACTION_EMOJIS,
+  DEFAULT_POSITIVE_REACTION_EMOJIS,
+  normalizeReactionEmojiList,
+} from '../utils/reactionEmojis';
+
+
+let colors = lightColors;
+const SCREEN_WIDTH = Dimensions.get('window').width;
+const SCREEN_HEIGHT = Dimensions.get('window').height;
+const IMAGE_MAX_WIDTH = SCREEN_WIDTH * 0.65;
+const LINK_CARD_MAX_WIDTH = SCREEN_WIDTH * 0.68;
+const MESSAGE_AVATAR_SIZE = 36;
+
+type TailSvgStyle = ViewStyle & TextStyle & {
+  svgPath?: string;
+  svgViewBox?: string;
+};
+
+function numberOrDefault(value: number | undefined, fallback: number, min: number, max: number) {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.min(max, Math.max(min, value as number));
+}
+
+function withAlpha(hex: string, alpha: number): string {
+  const normalized = hex.replace('#', '');
+  if (normalized.length !== 6) return hex;
+  const red = parseInt(normalized.slice(0, 2), 16);
+  const green = parseInt(normalized.slice(2, 4), 16);
+  const blue = parseInt(normalized.slice(4, 6), 16);
+  return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+}
+
+function shouldExpandMarkdownBlockBubble(text: string): boolean {
+  const listLinePattern = /^\s{0,3}(?:[-*+]\s+|\d+[.)]\s+)(.+)$/;
+  const dividerLinePattern = /^\s{0,3}(?:[-*_][ \t]*){3,}$/;
+  return text.split(/\r?\n/).some((line) =>
+    listLinePattern.test(line) || dividerLinePattern.test(line)
+  );
+}
+
+function createMarkdownDividerStyle(textColor: string, compact = false) {
+  return {
+    alignSelf: 'stretch' as const,
+    width: '100%' as const,
+    height: StyleSheet.hairlineWidth,
+    marginVertical: compact ? 6 : 10,
+    backgroundColor: withAlpha(textColor, compact ? 0.2 : 0.16),
+  };
+}
+
+function withoutFontWeight(style?: TextStyle): TextStyle | undefined {
+  const flatStyle = StyleSheet.flatten(style);
+  if (!flatStyle) return undefined;
+  const { fontWeight: _fontWeight, ...rest } = flatStyle;
+  return rest;
+}
+
+let cachedReactionMessages: Message[] | null = null;
+let cachedReactionMap = new Map<string, MessageReactionEvent>();
+
+function findMessageReactionEmoji(
+  messages: Message[],
+  targetMessageId: string,
+  reactor: MessageReactionActor
+): string {
+  if (cachedReactionMessages !== messages) {
+    cachedReactionMessages = messages;
+    cachedReactionMap = buildReactionMap(messages);
+  }
+  return cachedReactionMap.get(`${targetMessageId}:${reactor}`)?.emoji || '';
+}
+
+function buildVoiceEditText(content: string, voice?: VoiceAttachment): string {
+  const voiceToken = voice ? `[Voice:${voice.id}]` : '';
+  const transcript = voice?.transcriptStatus === 'completed' ? voice.transcript?.trim() : '';
+  if (transcript) return transcript;
+  if (voiceToken && content.trim() === voiceToken) return '';
+  return content;
+}
+
+function normalizeLocationThumbnailUrl(thumbnailUrl?: string): string | undefined {
+  if (!thumbnailUrl) return undefined;
+  try {
+    const url = new URL(thumbnailUrl);
+    if (!url.hostname.includes('apis.map.qq.com') || !url.pathname.includes('/ws/staticmap/')) {
+      return thumbnailUrl;
+    }
+
+    const markers = url.searchParams.get('markers');
+    if (markers) {
+      url.searchParams.set(
+        'markers',
+        markers
+          .replace(/color:0x[0-9a-fA-F]+/g, 'color:red')
+          .replace(/\|label:\|/g, '|')
+          .replace(/^label:\|/g, '')
+      );
+    }
+    if (!url.searchParams.has('maptype')) url.searchParams.set('maptype', 'roadmap');
+    if (!url.searchParams.has('format')) url.searchParams.set('format', 'png');
+    return url.toString();
+  } catch {
+    return thumbnailUrl;
+  }
+}
+
+function LocationCard({ location }: { location: LocationAttachment }) {
+  const [thumbnailFailed, setThumbnailFailed] = useState(false);
+  const thumbnailUrl = normalizeLocationThumbnailUrl(location.thumbnailUrl);
+
+  useEffect(() => {
+    setThumbnailFailed(false);
+  }, [thumbnailUrl]);
+
+  const shouldShowThumbnail = !!thumbnailUrl && !thumbnailFailed;
+
+  return (
+    <View style={styles.locationCard}>
+      {shouldShowThumbnail ? (
+        <Image
+          source={{ uri: thumbnailUrl }}
+          style={styles.locationMapImage}
+          resizeMode="cover"
+          onError={() => setThumbnailFailed(true)}
+        />
+      ) : (
+        <View style={styles.locationMapFallback}>
+          <Text style={styles.locationMapFallbackText}>地图</Text>
+        </View>
+      )}
+      <View style={styles.locationCardBody}>
+        <Text style={styles.locationTitle} numberOfLines={1}>{location.title || '我的位置'}</Text>
+        <Text style={styles.locationAddress} numberOfLines={2}>{location.address || `${location.latitude.toFixed(6)}, ${location.longitude.toFixed(6)}`}</Text>
+      </View>
+    </View>
+  );
+}
+
+function getSvgTailFill(style: StyleProp<TailSvgStyle>, fallbackColor: string): string {
+  const flatStyle = StyleSheet.flatten(style);
+  const color = typeof flatStyle?.color === 'string' ? flatStyle.color : undefined;
+  const backgroundColor = typeof flatStyle?.backgroundColor === 'string' ? flatStyle.backgroundColor : undefined;
+  return color || backgroundColor || fallbackColor;
+}
+
+function getSvgTailStyle(style: StyleProp<TailSvgStyle>): ViewStyle | undefined {
+  const flatStyle = StyleSheet.flatten(style);
+  if (!flatStyle) return undefined;
+  const {
+    color: _color,
+    backgroundColor: _backgroundColor,
+    svgPath: _svgPath,
+    svgViewBox: _svgViewBox,
+    ...viewStyle
+  } = flatStyle;
+  return viewStyle;
+}
+
+function getSvgTailPath(style: StyleProp<TailSvgStyle>, side: 'user' | 'assistant'): string {
+  const flatStyle = StyleSheet.flatten(style);
+  if (typeof flatStyle?.svgPath === 'string' && flatStyle.svgPath.trim()) {
+    return flatStyle.svgPath.trim();
+  }
+
+  return side === 'user'
+    ? 'M0 0 C1.8 6.2 6.4 10.8 14.6 11.6 C11.5 13.1 11.4 16.9 17.4 20 C8.2 19.4 1.8 13.7 0 5.2 Z'
+    : 'M18 0 C16.2 6.2 11.6 10.8 3.4 11.6 C6.5 13.1 6.6 16.9 0.6 20 C9.8 19.4 16.2 13.7 18 5.2 Z';
+}
+
+function getSvgTailViewBox(style: StyleProp<TailSvgStyle>): string {
+  const flatStyle = StyleSheet.flatten(style);
+  return typeof flatStyle?.svgViewBox === 'string' && flatStyle.svgViewBox.trim()
+    ? flatStyle.svgViewBox.trim()
+    : '0 0 18 20';
+}
+
+function BubbleTailSvg({
+  side,
+  style,
+  fallbackColor,
+}: {
+  side: 'user' | 'assistant';
+  style: StyleProp<TailSvgStyle>;
+  fallbackColor: string;
+}) {
+  const fill = getSvgTailFill(style, fallbackColor);
+  const svgStyle = getSvgTailStyle(style);
+  const path = getSvgTailPath(style, side);
+  const viewBox = getSvgTailViewBox(style);
+
+  return (
+    <Svg pointerEvents="none" viewBox={viewBox} preserveAspectRatio="none" style={svgStyle}>
+      <Path d={path} fill={fill} />
+    </Svg>
+  );
+}
+
+function MarkdownTable({
+  children,
+  markdownStyles,
+}: {
+  children: React.ReactNode;
+  markdownStyles: any;
+}) {
+  return (
+    <View
+      style={markdownStyles.markdownTableViewport}
+      onTouchStart={(event) => event.stopPropagation()}
+    >
+      <NativeViewGestureHandler shouldActivateOnStart disallowInterruption>
+        <GestureScrollView
+          horizontal
+          nestedScrollEnabled
+          showsHorizontalScrollIndicator
+          persistentScrollbar
+          directionalLockEnabled
+          disallowInterruption
+          keyboardShouldPersistTaps="handled"
+          scrollEventThrottle={16}
+          style={markdownStyles.markdownTableScroll}
+          contentContainerStyle={markdownStyles.markdownTableScrollContent}
+          onTouchStart={(event) => event.stopPropagation()}
+        >
+          <View style={[markdownStyles._VIEW_SAFE_table, markdownStyles.markdownTable]}>{children}</View>
+        </GestureScrollView>
+      </NativeViewGestureHandler>
+    </View>
+  );
+}
+
+function getMarkdownLanguageLabel(language?: string): string {
+  return (language || '').trim().split(/\s+/)[0]?.toLowerCase() || '';
+}
+
+function isMarkdownHtmlLanguage(language?: string): boolean {
+  const label = getMarkdownLanguageLabel(language);
+  return label === 'html' || label === 'htm' || label === 'xhtml';
+}
+
+function createMarkdownRules(options?: { messageId?: string }) {
+  let htmlBlockIndex = 0;
+
+  function nextHtmlBlockIndex(language?: string): number | undefined {
+    if (!isMarkdownHtmlLanguage(language)) return undefined;
+    const index = htmlBlockIndex;
+    htmlBlockIndex += 1;
+    return index;
+  }
+
+  return {
+    latex_inline: (node: any, _children: React.ReactNode, _parent: any, styles: any) => (
+      <LatexMarkdownNode
+        key={node.key}
+        content={node.content || ''}
+        color={styles.text?.color || colors.text}
+        fontSize={styles.text?.fontSize || 16}
+      />
+    ),
+    latex_block: (node: any, _children: React.ReactNode, _parent: any, styles: any) => (
+      <LatexMarkdownNode
+        key={node.key}
+        content={node.content || ''}
+        color={styles.text?.color || colors.text}
+        fontSize={styles.text?.fontSize || 16}
+        block
+      />
+    ),
+    text: (node: any, _children: React.ReactNode, parent: any[] = [], styles: any, inheritedStyles: any = {}) => {
+      const inStrong = parent.some((parentNode) => parentNode?.type === 'strong');
+      const inEm = parent.some((parentNode) => parentNode?.type === 'em');
+
+      return (
+        <Text
+          key={node.key}
+          style={[
+            inheritedStyles,
+            styles.text,
+            inStrong && styles.strong,
+            inStrong && !inEm && styles.markdownStrongText,
+          ]}
+        >
+          {node.content}
+        </Text>
+      );
+    },
+    strong: (node: any, children: React.ReactNode, parent: any[] = [], styles: any) => {
+      const shouldKeepItalic = parent.some((parentNode) => parentNode?.type === 'em');
+
+      return (
+        <Text
+          key={node.key}
+          style={[
+            styles.text,
+            styles.strong,
+            !shouldKeepItalic && styles.markdownStrongText,
+          ]}
+        >
+          {children}
+        </Text>
+      );
+    },
+    table: (node: any, children: React.ReactNode, _parent: any, styles: any) => (
+      <MarkdownTable key={node.key} markdownStyles={styles}>{children}</MarkdownTable>
+    ),
+    fence: (node: any, _children: React.ReactNode, _parent: any, styles: any, inheritedStyles: any = {}) => (
+      <MarkdownCodeBlock
+        key={node.key}
+        content={node.content || ''}
+        language={node.sourceInfo}
+        inheritedStyle={inheritedStyles}
+        codeStyle={styles.code_block}
+        messageId={options?.messageId}
+        htmlBlockIndex={nextHtmlBlockIndex(node.sourceInfo)}
+      />
+    ),
+    code_block: (node: any, _children: React.ReactNode, _parent: any, styles: any, inheritedStyles: any = {}) => (
+      <MarkdownCodeBlock
+        key={node.key}
+        content={node.content || ''}
+        inheritedStyle={inheritedStyles}
+        codeStyle={styles.code_block}
+        messageId={options?.messageId}
+        htmlBlockIndex={nextHtmlBlockIndex(node.sourceInfo)}
+      />
+    ),
+  };
+}
+
+const chatIcons = [
+  require('../../assets/chat1.png'),
+  require('../../assets/chat2.png'),
+  require('../../assets/chat3.png'),
+  require('../../assets/chat4.png'),
+  require('../../assets/chat5.png'),
+  require('../../assets/chat6.png'),
+];
+const chatTTSPlayingIcon = require('../../assets/chat3-2.png');
+interface Props {
+  message: Message;
+  previousUserMessage?: Message | null;
+  isLastAssistant?: boolean;
+  showAssistantFooter?: boolean;
+  isHidden?: boolean;
+  floorNumber?: number;
+  showFloorNumber?: boolean;
+  showAvatarHeader?: boolean;
+  showSideAvatar?: boolean;
+  showBubbleTail?: boolean;
+  blurEnabled?: boolean;
+  blurTarget?: React.RefObject<View | null>;
+  onBubblePress?: (messageId: string) => void;
+  onToolDetailScrollActiveChange?: (active: boolean) => void;
+}
+
+// 把一次工具调用格式化成「动作描述 + 参数」的单行文字。
+// 参数取第一个有意义的字段（query/date 等），解析失败时仅显示动作描述。
+function formatToolInvocation(name: string, rawArgs: string): string {
+  const label = getToolLabel(name);
+  let detail = '';
+  try {
+    const args = JSON.parse(rawArgs || '{}');
+    detail = args.query ?? args.types ?? args.date ?? args.url ?? args.title ?? args.start_date ?? args.package_name ?? args.id ?? args.ms ?? args.index ?? args.selector ?? '';
+    if (!detail && args.x != null && args.y != null) {
+      detail = `${args.x}, ${args.y}`;
+    }
+    if (detail && typeof detail !== 'string') detail = String(detail);
+  } catch {
+    detail = '';
+  }
+  return detail ? `${label}：${detail}` : label;
+}
+
+function formatDebugJson(raw: string): string {
+  if (!raw) return '{}';
+  try {
+    return JSON.stringify(JSON.parse(raw), null, 2);
+  } catch {
+    return raw;
+  }
+}
+
+function formatVoiceDuration(durationMs: number): string {
+  const totalSeconds = Math.max(1, Math.round((durationMs || 0) / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes > 0 ? `${minutes}:${String(seconds).padStart(2, '0')}` : `${seconds}s`;
+}
+
+// 思维链记录与工具调用保持同一行样式，点击展开/收起内容。
+function getThinkingPreview(thinking: string): string {
+  const plainText = thinking
+    .replace(/<\/?thinking>/gi, '')
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/^\s{0,3}(?:#{1,6}|[-*+]|\d+[.)])\s+/gm, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!plainText) return 'Thinking';
+
+  return (plainText.match(/^.*?[。！？.!?]/)?.[0] || plainText).trim();
+}
+
+function ThinkingBlock({ thinking, onPress }: { thinking: string; onPress: () => void }) {
+  const preview = getThinkingPreview(thinking);
+  return (
+    <View style={styles.thinkingWrap}>
+      <Pressable style={styles.toolInlineItem} onPress={onPress}>
+        <View style={styles.toolRow}>
+          <Image
+            source={require('../../assets/clock.png')}
+            style={styles.toolIconLeft}
+            resizeMode="contain"
+          />
+          <Text style={styles.toolText} numberOfLines={1} ellipsizeMode="tail">
+            {preview}
+          </Text>
+          <Image
+            source={require('../../assets/arrow-right.png')}
+            style={styles.toolIconRight}
+            resizeMode="contain"
+          />
+        </View>
+      </Pressable>
+    </View>
+  );
+}
+
+function extractThinkingParts(raw: string): string[] {
+  const parts: string[] = [];
+  const pattern = /<thinking>([\s\S]*?)(?:<\/thinking>|$)/gi;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(raw)) !== null) {
+    const content = match[1].trim();
+    if (content) parts.push(content);
+  }
+  return parts;
+}
+
+type SummaryDetail =
+  | { type: 'thinking'; index: number; content: string }
+  | { type: 'tool'; index: number; invocation: ToolInvocation };
+
+// 从 AI 输出中拆出所有思维链与剩余正文。
+function splitThinking(raw: string): { thinking: string; body: string } {
+  if (!raw) return { thinking: '', body: '' };
+  const openPattern = /<thinking>/gi;
+  const closePattern = /<\/thinking>/gi;
+  const thinkingParts: string[] = [];
+  const bodyParts: string[] = [];
+  let cursor = 0;
+  let openMatch: RegExpExecArray | null;
+
+  while ((openMatch = openPattern.exec(raw)) !== null) {
+    const openStart = openMatch.index;
+    const openEnd = openPattern.lastIndex;
+    if (openStart < cursor) continue;
+
+    bodyParts.push(raw.slice(cursor, openStart));
+    closePattern.lastIndex = openEnd;
+    const closeMatch = closePattern.exec(raw);
+
+    if (!closeMatch) {
+      thinkingParts.push(raw.slice(openEnd));
+      cursor = raw.length;
+      break;
+    }
+
+    thinkingParts.push(raw.slice(openEnd, closeMatch.index));
+    cursor = closePattern.lastIndex;
+    openPattern.lastIndex = cursor;
+  }
+
+  bodyParts.push(raw.slice(cursor));
+  return {
+    thinking: thinkingParts.map((part) => part.trim()).filter(Boolean).join('\n\n---\n\n'),
+    body: bodyParts.join('').trim(),
+  };
+}
+
+type AssistantFlowPart =
+  | { type: 'text'; key: string; content: string; pictureOffset: number }
+  | { type: 'tool'; key: string; invocation: ToolInvocation; invocationIndex: number };
+
+type AssistantBubbleFlowPart = AssistantFlowPart;
+
+const PIC_TOKEN_PATTERN = /\[Pic:[^\]\r\n]+\]/g;
+
+function countPicTokens(text: string): number {
+  return (text.match(PIC_TOKEN_PATTERN) || []).length;
+}
+
+function normalizeGeneratedPicsForSegment(
+  generatedPics: GeneratedPicture[] | undefined,
+  pictureOffset: number,
+  pictureCount: number
+): GeneratedPicture[] | undefined {
+  if (!generatedPics || pictureCount <= 0) return undefined;
+  const segmentPics = generatedPics
+    .filter((picture) => picture.tokenIndex >= pictureOffset && picture.tokenIndex < pictureOffset + pictureCount)
+    .map((picture) => ({ ...picture, tokenIndex: picture.tokenIndex - pictureOffset }));
+  return segmentPics.length > 0 ? segmentPics : undefined;
+}
+
+function findParagraphEndOffsets(text: string): number[] {
+  const offsets: number[] = [];
+  if (text.includes('```')) return offsets;
+  const pattern = /\n{2,}/g;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(text)) !== null) {
+    offsets.push(match.index);
+  }
+  return offsets;
+}
+
+function getFallbackToolOffset(body: string, index: number): number {
+  const paragraphEnds = findParagraphEndOffsets(body);
+  return paragraphEnds[index] ?? body.length;
+}
+
+function getBodyOffsetForRawContentOffset(rawContent: string, rawOffset: number, bodyLength: number): number {
+  const safeRawOffset = Math.max(0, Math.min(rawContent.length, rawOffset));
+  const prefixBody = splitThinking(rawContent.slice(0, safeRawOffset)).body;
+  return Math.max(0, Math.min(bodyLength, prefixBody.length));
+}
+
+function buildAssistantFlowParts(
+  rawContent: string,
+  body: string,
+  invocations?: ToolInvocation[]
+): AssistantFlowPart[] {
+  const tools = invocations || [];
+  if (tools.length === 0) {
+    return body.length > 0 ? [{ type: 'text', key: 'text-0', content: body, pictureOffset: 0 }] : [];
+  }
+
+  const positionedTools = tools
+    .map((invocation, invocationIndex) => {
+      const offset = typeof invocation.contentOffset === 'number'
+        ? getBodyOffsetForRawContentOffset(rawContent, invocation.contentOffset, body.length)
+        : getFallbackToolOffset(body, invocationIndex);
+      return { invocation, invocationIndex, offset };
+    })
+    .sort((a, b) => a.offset - b.offset || a.invocationIndex - b.invocationIndex);
+
+  const parts: AssistantFlowPart[] = [];
+  let cursor = 0;
+
+  positionedTools.forEach((item) => {
+    const offset = Math.max(cursor, Math.min(body.length, item.offset));
+    if (offset > cursor) {
+      const content = body.slice(cursor, offset);
+      parts.push({
+        type: 'text',
+        key: `text-${cursor}-${offset}`,
+        content,
+        pictureOffset: countPicTokens(body.slice(0, cursor)),
+      });
+      cursor = offset;
+    }
+    parts.push({
+      type: 'tool',
+      key: `tool-${item.invocationIndex}`,
+      invocation: item.invocation,
+      invocationIndex: item.invocationIndex,
+    });
+  });
+
+  if (cursor < body.length) {
+    parts.push({
+      type: 'text',
+      key: `text-${cursor}-${body.length}`,
+      content: body.slice(cursor),
+      pictureOffset: countPicTokens(body.slice(0, cursor)),
+    });
+  }
+
+  return parts;
+}
+
+function trimSegmentWithOffset(text: string, start: number): { content: string; start: number } | null {
+  const leadingLength = text.match(/^\s*/)?.[0].length ?? 0;
+  const trailingLength = text.match(/\s*$/)?.[0].length ?? 0;
+  const content = text.slice(leadingLength, Math.max(leadingLength, text.length - trailingLength));
+  return content.length > 0 ? { content, start: start + leadingLength } : null;
+}
+
+function splitParagraphSegments(text: string, start: number): Array<{ content: string; start: number }> {
+  if (!text) return [];
+  const segments: Array<{ content: string; start: number }> = [];
+  const paragraphBreakPattern = /\n{2,}/g;
+
+  function pushParagraphs(source: string, sourceStart: number) {
+    paragraphBreakPattern.lastIndex = 0;
+    let cursor = 0;
+    let match: RegExpExecArray | null;
+
+    while ((match = paragraphBreakPattern.exec(source)) !== null) {
+      const segment = trimSegmentWithOffset(source.slice(cursor, match.index), sourceStart + cursor);
+      if (segment) segments.push(segment);
+      cursor = paragraphBreakPattern.lastIndex;
+    }
+
+    const finalSegment = trimSegmentWithOffset(source.slice(cursor), sourceStart + cursor);
+    if (finalSegment) segments.push(finalSegment);
+  }
+
+  const fencePattern = /```[\s\S]*?(?:```|$)/g;
+  let cursor = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = fencePattern.exec(text)) !== null) {
+    if (match.index > cursor) {
+      pushParagraphs(text.slice(cursor, match.index), start + cursor);
+    }
+
+    const codeSegment = trimSegmentWithOffset(match[0], start + match.index);
+    if (codeSegment) segments.push(codeSegment);
+    cursor = fencePattern.lastIndex;
+  }
+
+  if (cursor < text.length) {
+    pushParagraphs(text.slice(cursor), start + cursor);
+  }
+
+  return segments;
+}
+
+function splitAssistantTextPartForBubbles(
+  part: Extract<AssistantFlowPart, { type: 'text' }>,
+  stickers: StickerDefinition[]
+): AssistantBubbleFlowPart[] {
+  const segments: AssistantBubbleFlowPart[] = [];
+  const stickerPattern = /\[Sticker:([^\]\r\n]+)\]/g;
+  let cursor = 0;
+  let match: RegExpExecArray | null;
+  let segmentIndex = 0;
+
+  function pushTextSegments(text: string, start: number) {
+    splitParagraphSegments(text, start).forEach((segment) => {
+      segments.push({
+        type: 'text',
+        key: `${part.key}-segment-${segmentIndex}`,
+        content: segment.content,
+        pictureOffset: part.pictureOffset + countPicTokens(part.content.slice(0, segment.start)),
+      });
+      segmentIndex += 1;
+    });
+  }
+
+  while ((match = stickerPattern.exec(part.content)) !== null) {
+    const sticker = getStickerByName(match[1], stickers);
+    if (!sticker) continue;
+
+    if (match.index > cursor) {
+      pushTextSegments(part.content.slice(cursor, match.index), cursor);
+    }
+
+    segments.push({
+      type: 'text',
+      key: `${part.key}-sticker-${segmentIndex}`,
+      content: match[0],
+      pictureOffset: part.pictureOffset + countPicTokens(part.content.slice(0, match.index)),
+    });
+    segmentIndex += 1;
+    cursor = match.index + match[0].length;
+  }
+
+  if (cursor < part.content.length) {
+    pushTextSegments(part.content.slice(cursor), cursor);
+  }
+
+  return segments;
+}
+
+function buildAssistantBubbleFlowParts(
+  parts: AssistantFlowPart[],
+  stickers: StickerDefinition[]
+): AssistantBubbleFlowPart[] {
+  return parts.flatMap((part) => (
+    part.type === 'text' ? splitAssistantTextPartForBubbles(part, stickers) : [part]
+  ));
+}
+
+function endsWithStickerContent(content: string, stickers: StickerDefinition[]): boolean {
+  const match = content.match(/\[Sticker:([^\]\r\n]+)\]\s*$/);
+  return !!match && !!getStickerByName(match[1], stickers);
+}
+
+function isRemoteActivityMessage(message: Message): boolean {
+  return message.role === 'assistant' && (
+    message.id.startsWith('remote-activity-') ||
+    message.content.trimStart().startsWith('[远程自主判断]') ||
+    message.content.trimStart().startsWith('[远程自主活动记录]')
+  );
+}
+
+function getBubbleBlurStyle(style: StyleProp<ViewStyle>): StyleProp<ViewStyle> {
+  const flatStyle = StyleSheet.flatten(style);
+  return [
+    StyleSheet.absoluteFill,
+    styles.bubbleBlurLayer,
+    {
+      borderRadius: flatStyle?.borderRadius,
+      borderTopLeftRadius: flatStyle?.borderTopLeftRadius,
+      borderTopRightRadius: flatStyle?.borderTopRightRadius,
+      borderBottomRightRadius: flatStyle?.borderBottomRightRadius,
+      borderBottomLeftRadius: flatStyle?.borderBottomLeftRadius,
+    },
+  ];
+}
+
+function parseRemoteActivityContent(
+  content: string,
+  assistantName: string
+): { title: string; eyebrow: string; summary: string } {
+  const trimmed = content.trim();
+  const isNoop = trimmed.startsWith('[远程自主判断]');
+  const isActivity = trimmed.startsWith('[远程自主活动记录]');
+  const displayName = assistantName.trim() || 'AI';
+  const withoutMarker = trimmed
+    .replace(/^\[远程自主判断\]\s*/, '')
+    .replace(/^\[远程自主活动记录\]\s*/, '');
+  const [summaryBlock] = withoutMarker.split(/\n\s*工具调用：/);
+  const summary = summaryBlock.trim() || (isNoop ? 'AI 判断暂时不需要打扰你。' : 'AI 记录了一次远程活动。');
+
+  if (isNoop) {
+    return {
+      title: `${displayName} 没有打扰你`,
+      eyebrow: '远程判断',
+      summary,
+    };
+  }
+
+  return {
+    title: isActivity ? `${displayName} 记录了一次活动` : `${displayName} 远程活动`,
+    eyebrow: '后台同步',
+    summary,
+  };
+}
+
+function RemoteActivityCard({
+  message,
+  assistantName,
+  onPress,
+  onLongPress,
+}: {
+  message: Message;
+  assistantName: string;
+  onPress?: () => void;
+  onLongPress: (event: any) => void;
+}) {
+  const card = parseRemoteActivityContent(message.content, assistantName);
+  const tools = message.toolInvocations || [];
+
+  return (
+    <Pressable
+      style={styles.remoteActivityCard}
+      onPress={onPress}
+      onLongPress={onLongPress}
+    >
+      <View style={styles.remoteActivityHeader}>
+        <View style={styles.remoteActivityStatus}>
+          <View style={styles.remoteActivityDot} />
+          <Text style={styles.remoteActivityEyebrow}>{card.eyebrow}</Text>
+        </View>
+        <Text style={styles.remoteActivityTime}>{formatSmartTime(message.createdAt)}</Text>
+      </View>
+      <Text style={styles.remoteActivityTitle}>{card.title}</Text>
+      <Text style={styles.remoteActivitySummary} selectable>{card.summary}</Text>
+      {tools.length > 0 && (
+        <View style={styles.remoteActivityTools}>
+          {tools.slice(0, 4).map((tool, index) => (
+            <View key={`${tool.name}-${index}`} style={styles.remoteActivityToolItem}>
+              <Text style={styles.remoteActivityToolName} numberOfLines={1}>
+                {formatToolInvocation(tool.name, tool.args)}
+              </Text>
+              {!!tool.result && (
+                <Text style={styles.remoteActivityToolResult} numberOfLines={2}>
+                  {tool.result}
+                </Text>
+              )}
+            </View>
+          ))}
+          {tools.length > 4 && (
+            <Text style={styles.remoteActivityMoreTools}>还有 {tools.length - 4} 个工具调用</Text>
+          )}
+        </View>
+      )}
+    </Pressable>
+  );
+}
+
+function SharedLinkCard({ url }: { url: string }) {
+  const info = getLinkCardInfo(url);
+
+  return (
+    <View style={styles.sharedLinkCard}>
+      <View style={styles.sharedLinkIconWrap}>
+        <Image
+          source={require('../../assets/web.png')}
+          style={styles.sharedLinkIcon}
+          resizeMode="contain"
+        />
+      </View>
+      <View style={styles.sharedLinkTextBlock}>
+        <Text style={styles.sharedLinkTitle} numberOfLines={1}>
+          {info.title}
+        </Text>
+        <Text style={styles.sharedLinkSubtitle} numberOfLines={2}>
+          {info.subtitle}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+function DailyPaperForwardCard({ paper }: { paper: DailyPaperCardPayload }) {
+  return (
+    <View style={styles.dailyPaperCard}>
+      <Text style={styles.dailyPaperEyebrow}>每日日报 · {paper.dateKey}</Text>
+      <Text style={styles.dailyPaperTitle} numberOfLines={2}>{paper.title}</Text>
+      <Text style={styles.dailyPaperSummary} numberOfLines={3}>{paper.summary || '点击查看完整日报'}</Text>
+      <Text style={styles.dailyPaperMeta}>{paper.sourceCount || paper.sources.length} 个来源 · 点击看全文</Text>
+    </View>
+  );
+}
+
+export const ChatBubble = React.memo(function ChatBubble({
+  message,
+  previousUserMessage,
+  isLastAssistant,
+  showAssistantFooter,
+  isHidden,
+  floorNumber,
+  showFloorNumber,
+  showAvatarHeader = true,
+  showSideAvatar = true,
+  showBubbleTail = true,
+  blurEnabled = true,
+  blurTarget,
+  onBubblePress,
+}: Props) {
+  colors = useThemeColors();
+  styles = useMemo(() => createStyles(colors), [colors]);
+  const appearanceConfig = useSettingsStore((state) => state.appearanceConfig);
+  const stickerConfig = useSettingsStore((state) => state.stickerConfig);
+  const customCssStyles = useMemo(
+    () => parseAppearanceCss(appearanceConfig?.customCss),
+    [appearanceConfig?.customCss]
+  );
+  const cssStyle = (...selectors: string[]) => getAppearanceCssStyle(customCssStyles, ...selectors);
+  const imageCssStyle = (...selectors: string[]) => cssStyle(...selectors) as ImageStyle | undefined;
+  const customUserTextCssStyle = useMemo(
+    () => ({
+      ...(customCssStyles.userText || {}),
+      ...(getAppearanceCssStyle(customCssStyles, '.user-text', '.chat-user-text') || {}),
+    }),
+    [customCssStyles]
+  );
+  const customAssistantTextCssStyle = useMemo(
+    () => ({
+      ...(customCssStyles.assistantText || {}),
+      ...(getAppearanceCssStyle(customCssStyles, '.assistant-text', '.chat-assistant-text') || {}),
+    }),
+    [customCssStyles]
+  );
+  const userBubbleCssStyle = useMemo(
+    () => ({
+      ...(customCssStyles.userBubble || {}),
+      ...(getAppearanceCssStyle(customCssStyles, '.user-bubble', '.chat-user-bubble') || {}),
+    }),
+    [customCssStyles]
+  );
+  const userBubbleTailCssStyle = useMemo(
+    () => withoutAppearanceGlassProps(cssStyle('.user-bubble-tail', '.chat-user-bubble-tail')),
+    [customCssStyles]
+  );
+  const userBubbleTailSvgCssStyle = useMemo(
+    () => withoutAppearanceGlassProps(cssStyle('.user-bubble-tail-svg', '.chat-user-bubble-tail-svg')),
+    [customCssStyles]
+  );
+  const assistantBubbleCssStyle = useMemo(
+    () => ({
+      ...(customCssStyles.assistantBubble || {}),
+      ...(getAppearanceCssStyle(customCssStyles, '.assistant-bubble', '.chat-assistant-bubble') || {}),
+    }),
+    [customCssStyles]
+  );
+  const assistantBubbleTailCssStyle = useMemo(
+    () => withoutAppearanceGlassProps(cssStyle('.assistant-bubble-tail', '.chat-assistant-bubble-tail')),
+    [customCssStyles]
+  );
+  const assistantBubbleTailSvgCssStyle = useMemo(
+    () => withoutAppearanceGlassProps(cssStyle('.assistant-bubble-tail-svg', '.chat-assistant-bubble-tail-svg')),
+    [customCssStyles]
+  );
+  const userBubbleGlass = useMemo(() => {
+    const config = getAppearanceGlassConfig(userBubbleCssStyle);
+    return blurEnabled ? config : { ...config, enabled: false };
+  }, [blurEnabled, userBubbleCssStyle]);
+  const assistantBubbleGlass = useMemo(() => {
+    const config = getAppearanceGlassConfig(assistantBubbleCssStyle);
+    return blurEnabled ? config : { ...config, enabled: false };
+  }, [assistantBubbleCssStyle, blurEnabled]);
+  const userBubbleColor = appearanceConfig?.userBubbleColor || colors.userBubble;
+  const userBubbleTransparent = !!appearanceConfig?.userBubbleTransparent;
+  const userBubbleRadius = numberOrDefault(appearanceConfig?.userBubbleRadius, 20, 0, 36);
+  const userBubbleWidthPercent = numberOrDefault(appearanceConfig?.userBubbleWidthPercent, 75, 45, 100);
+  const assistantBubbleStyle = appearanceConfig?.assistantBubbleStyle || 'plain';
+  const assistantBubbleColor = appearanceConfig?.assistantBubbleColor || colors.userBubble;
+  const assistantBubbleTransparent = !!appearanceConfig?.assistantBubbleTransparent;
+  const assistantBubbleRadius = numberOrDefault(appearanceConfig?.assistantBubbleRadius, 20, 0, 36);
+  const assistantBubbleWidthPercent = numberOrDefault(appearanceConfig?.assistantBubbleWidthPercent, 75, 45, 100);
+  const assistantFooterHidden = !!appearanceConfig?.assistantFooterHidden;
+  const assistantActionsHidden = !!appearanceConfig?.assistantActionsHidden;
+  const assistantFooterColor = appearanceConfig?.assistantFooterColor || colors.conversationMuted;
+  const userFontSize = numberOrDefault(appearanceConfig?.userFontSize, 16, 12, 24);
+  const assistantFontSize = numberOrDefault(appearanceConfig?.assistantFontSize, 16, 12, 24);
+  const userTextColor = appearanceConfig?.userTextColor || colors.text;
+  const assistantTextColor = appearanceConfig?.assistantTextColor || colors.text;
+  const assistantTextStrokeColor = appearanceConfig?.assistantTextStrokeColor || colors.background;
+  const assistantTextStrokeWidth = numberOrDefault(appearanceConfig?.assistantTextStrokeWidth, 0, 0, 8);
+  const summaryRegularTextStyle = useMemo(
+    () => ({
+      color: assistantTextColor,
+      fontSize: assistantFontSize,
+      lineHeight: Math.round(assistantFontSize * 1.5),
+      fontFamily: fonts.serif,
+      fontWeight: 'normal' as const,
+    }),
+    [assistantFontSize, assistantTextColor]
+  );
+  const userTextStyle = useMemo(
+    () => [
+      {
+        color: userTextColor,
+        fontSize: userFontSize,
+        lineHeight: Math.round(userFontSize * 1.38),
+      },
+      customUserTextCssStyle,
+    ],
+    [customUserTextCssStyle, userFontSize, userTextColor]
+  );
+  const userMarkdownStyles = useMemo(
+    () => createUserMarkdownStyles(colors, userFontSize, userTextColor, customUserTextCssStyle),
+    [colors, customUserTextCssStyle, userFontSize, userTextColor]
+  );
+  markdownStyles = useMemo(
+    () => createMarkdownStyles(
+      colors,
+      assistantFontSize,
+      assistantTextColor,
+      assistantTextStrokeColor,
+      assistantTextStrokeWidth,
+      customAssistantTextCssStyle
+    ),
+    [
+      assistantFontSize,
+      assistantTextColor,
+      assistantTextStrokeColor,
+      assistantTextStrokeWidth,
+      colors,
+      customAssistantTextCssStyle,
+    ]
+  );
+  const assistantBubbleMarkdownStyles = useMemo(
+    () => createMarkdownStyles(
+      colors,
+      assistantFontSize,
+      assistantTextColor,
+      assistantTextStrokeColor,
+      assistantTextStrokeWidth,
+      customAssistantTextCssStyle,
+      true
+    ),
+    [
+      assistantFontSize,
+      assistantTextColor,
+      assistantTextStrokeColor,
+      assistantTextStrokeWidth,
+      colors,
+      customAssistantTextCssStyle,
+    ]
+  );
+
+  const isUser = message.role === 'user';
+  const messageStickers = useMemo(
+    () => buildStickerDefinitions(isUser ? stickerConfig?.userStickers : stickerConfig?.assistantStickers),
+    [isUser, stickerConfig?.assistantStickers, stickerConfig?.userStickers]
+  );
+  const messageAvatarsVisible = !!appearanceConfig?.messageAvatarsVisible;
+  const messageAvatarLayout = appearanceConfig?.messageAvatarLayout === 'side' ? 'side' : 'header';
+  const sideAvatarsVisible = messageAvatarsVisible && messageAvatarLayout === 'side';
+  const sideAvatarShown = showSideAvatar && !(isUser && appearanceConfig?.hideUserSideAvatar);
+  const headerAvatarsVisible = messageAvatarsVisible && messageAvatarLayout === 'header';
+  const messageMetaVisible = appearanceConfig?.messageMetaVisible ?? true;
+  const messageAvatarRadius = numberOrDefault(appearanceConfig?.messageAvatarRadius, 18, 0, 20);
+  const userDisplayName = (appearanceConfig?.userDisplayName || 'You').trim() || 'You';
+  const assistantDisplayName = (appearanceConfig?.assistantDisplayName || 'Claude').trim() || 'Claude';
+  const avatarImageUri = isUser ? appearanceConfig?.userAvatarImageUri : appearanceConfig?.assistantAvatarImageUri;
+  const avatarName = isUser ? userDisplayName : assistantDisplayName;
+  const avatarFallback = isUser ? 'U' : 'AI';
+  const avatarHeaderCssStyle = cssStyle(
+    '.message-avatar-row',
+    '.chat-message-avatar-row',
+    isUser ? '.user-avatar-row' : '.assistant-avatar-row',
+    isUser ? '.chat-user-avatar-row' : '.chat-assistant-avatar-row'
+  );
+  const avatarImageCssStyle = imageCssStyle(
+    '.message-avatar',
+    '.message-avatar-image',
+    '.chat-message-avatar',
+    isUser ? '.user-avatar' : '.assistant-avatar',
+    isUser ? '.user-avatar-image' : '.assistant-avatar-image',
+    isUser ? '.chat-user-avatar' : '.chat-assistant-avatar'
+  );
+  const avatarFallbackCssStyle = cssStyle(
+    '.message-avatar',
+    '.message-avatar-fallback',
+    '.chat-message-avatar',
+    isUser ? '.user-avatar' : '.assistant-avatar',
+    isUser ? '.user-avatar-fallback' : '.assistant-avatar-fallback',
+    isUser ? '.chat-user-avatar' : '.chat-assistant-avatar'
+  );
+  const avatarFallbackTextCssStyle = cssStyle(
+    '.message-avatar-text',
+    '.message-avatar-fallback-text',
+    isUser ? '.user-avatar-text' : '.assistant-avatar-text',
+    isUser ? '.user-avatar-fallback-text' : '.assistant-avatar-fallback-text'
+  );
+  const avatarNameCssStyle = cssStyle(
+    '.message-avatar-name',
+    isUser ? '.user-avatar-name' : '.assistant-avatar-name'
+  );
+  const avatarMetaCssStyle = cssStyle(
+    '.message-avatar-meta',
+    isUser ? '.user-avatar-meta' : '.assistant-avatar-meta'
+  );
+  const messageHasSticker = hasStickerToken(message.content, messageStickers);
+  const messageIsStickerOnly = isStickerOnlyContent(message.content, messageStickers);
+  const messageEndsWithSticker = endsWithStickerContent(message.content, messageStickers);
+  const sharedLinkUrl = isUser ? getSingleHttpUrlMessage(message.content) : null;
+  const dailyPaperCard = isUser ? parseDailyPaperCardMessage(message.content) : null;
+  const editMessage = useChatStore((state) => state.editMessage);
+  const editVoiceTranscript = useChatStore((state) => state.editVoiceTranscript);
+  const removeMessage = useChatStore((state) => state.removeMessage);
+  const removeToolInvocation = useChatStore((state) => state.removeToolInvocation);
+  const regenerateGeneratedPicture = useChatStore((state) => state.regenerateGeneratedPicture);
+  const deleteGeneratedPictureOnly = useChatStore((state) => state.deleteGeneratedPictureOnly);
+  const deleteGeneratedPictureAndPrompt = useChatStore((state) => state.deleteGeneratedPictureAndPrompt);
+  const addHiddenRange = useChatStore((state) => state.addHiddenRange);
+  const restoreHiddenRange = useChatStore((state) => state.restoreHiddenRange);
+  const setMessageHidden = useChatStore((state) => state.setMessageHidden);
+  const setMessageReaction = useChatStore((state) => state.setMessageReaction);
+  const nativeToolConfig = useSettingsStore((state) => state.nativeToolConfig);
+  const positiveReactions = normalizeReactionEmojiList(
+    nativeToolConfig?.positiveReactionEmojis,
+    DEFAULT_POSITIVE_REACTION_EMOJIS
+  );
+  const negativeReactions = normalizeReactionEmojiList(
+    nativeToolConfig?.negativeReactionEmojis,
+    DEFAULT_NEGATIVE_REACTION_EMOJIS
+  );
+  // Subscribe only to this bubble's primitive reaction values. Subscribing to
+  // the whole messages array would rerender every historical Markdown/LaTeX
+  // bubble for every streamed token in the latest response.
+  const userReactionEmoji = useChatStore((state) =>
+    findMessageReactionEmoji(state.messages, message.id, 'user')
+  );
+  const assistantReactionEmoji = useChatStore((state) =>
+    findMessageReactionEmoji(state.messages, message.id, 'assistant')
+  );
+  const regenerate = useChatStore((state) => state.regenerate);
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [editText, setEditText] = useState('');
+  // 当前编辑目标消息的 id
+  const [editTargetId, setEditTargetId] = useState<string | null>(null);
+  // 用户气泡长按浮出的操作菜单是否显示
+  const [menuVisible, setMenuVisible] = useState(false);
+  const [assistantMenuVisible, setAssistantMenuVisible] = useState(false);
+  const [isFavorite, setIsFavorite] = useState(false);
+  const [pictureActionTarget, setPictureActionTarget] = useState<GeneratedPicture | null>(null);
+  const [pictureActionBusy, setPictureActionBusy] = useState(false);
+  const [previewImage, setPreviewImage] = useState<{ uri: string; title?: string } | null>(null);
+  const [dailyPaperVisible, setDailyPaperVisible] = useState(false);
+  const [reactionPicker, setReactionPicker] = useState<'positive' | 'negative' | null>(null);
+  const [reactionPickerAnchor, setReactionPickerAnchor] = useState({ x: 0, y: 0 });
+  const [playingVoiceId, setPlayingVoiceId] = useState<string | null>(null);
+  const [isTTSPlaying, setIsTTSPlaying] = useState(false);
+  // 长按时测量得到的气泡屏幕坐标，用于把菜单锚定到气泡上方
+  const [menuAnchor, setMenuAnchor] = useState({ x: 0, y: 0, width: 0, height: 0 });
+  const [summaryVisible, setSummaryVisible] = useState(false);
+  const [summaryMaskVisible, setSummaryMaskVisible] = useState(false);
+  const [summaryDetail, setSummaryDetail] = useState<SummaryDetail | null>(null);
+  const summaryTranslateY = useRef(new Animated.Value(Dimensions.get('window').height)).current;
+  const bubbleRef = useRef<View>(null);
+  const voicePlayerRef = useRef<ReturnType<typeof createAudioPlayer> | null>(null);
+  const voicePlayerSubscriptionRef = useRef<{ remove: () => void } | null>(null);
+  const markdownRules = useMemo(
+    () => createMarkdownRules({ messageId: message.id }),
+    [message.id]
+  );
+  const handleBubbleTap = useCallback(() => {
+    onBubblePress?.(message.id);
+  }, [message.id, onBubblePress]);
+  const stopVoicePlayback = useCallback(() => {
+    voicePlayerSubscriptionRef.current?.remove();
+    voicePlayerSubscriptionRef.current = null;
+    if (voicePlayerRef.current) {
+      voicePlayerRef.current.pause();
+      voicePlayerRef.current.remove();
+      voicePlayerRef.current = null;
+    }
+    setPlayingVoiceId(null);
+  }, []);
+  useEffect(() => stopVoicePlayback, [stopVoicePlayback]);
+  useEffect(() => {
+    if (message.role !== 'assistant') return;
+    let active = true;
+    isMessageFavorite(message.id)
+      .then((favorite) => active && setIsFavorite(favorite))
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, [message.id, message.role]);
+  const handleVoicePress = useCallback(() => {
+    const voice = message.voiceAttachment;
+    if (!voice) return;
+    if (!voice.uri) {
+      Alert.alert('语音已清理', '这条语音文件已超过 7 天保留期，仅保留转写文字。');
+      return;
+    }
+    if (playingVoiceId === voice.id) {
+      stopVoicePlayback();
+      return;
+    }
+    stopVoicePlayback();
+    try {
+      const player = createAudioPlayer(voice.uri);
+      voicePlayerRef.current = player;
+      voicePlayerSubscriptionRef.current = player.addListener('playbackStatusUpdate', (status: AudioStatus) => {
+        if (status.didJustFinish || status.error) {
+          stopVoicePlayback();
+        }
+      });
+      setPlayingVoiceId(voice.id);
+      player.play();
+    } catch (error: any) {
+      Alert.alert('播放失败', error?.message || '无法播放这条语音');
+    }
+  }, [message.voiceAttachment, playingVoiceId, stopVoicePlayback]);
+  const floorText = floorNumber !== undefined ? `#${floorNumber}` : null;
+  const canToggleFloorHidden = floorNumber !== undefined;
+  const hiddenToggleText = isHidden ? '恢复' : '隐藏';
+  const avatarMetaText = [floorText, formatSmartTime(message.createdAt)].filter(Boolean).join(' · ');
+  const floorLabel = !messageAvatarsVisible && showFloorNumber && floorText
+    ? `${floorText} · ${formatSmartTime(message.createdAt)}`
+    : null;
+  const avatarNode = messageAvatarsVisible ? (
+    avatarImageUri ? (
+      <Image
+        source={{ uri: avatarImageUri }}
+        style={[
+          styles.messageAvatarImage,
+          { borderRadius: messageAvatarRadius },
+          avatarImageCssStyle,
+        ]}
+        resizeMode="cover"
+      />
+    ) : (
+      <View
+        style={[
+          styles.messageAvatarFallback,
+          { borderRadius: messageAvatarRadius },
+          avatarFallbackCssStyle,
+        ]}
+      >
+        <Text style={[styles.messageAvatarFallbackText, avatarFallbackTextCssStyle]}>{avatarFallback}</Text>
+      </View>
+    )
+  ) : null;
+  const renderSideAvatarSlot = (displayAvatar: boolean) => sideAvatarsVisible ? (
+    <View
+      style={[
+        styles.messageSideAvatarSlot,
+        isUser ? styles.userSideAvatarSlot : styles.assistantSideAvatarSlot,
+        cssStyle(
+          '.message-avatar-side-slot',
+          isUser ? '.user-avatar-side-slot' : '.assistant-avatar-side-slot'
+        ),
+      ]}
+    >
+      {displayAvatar ? avatarNode : null}
+    </View>
+  ) : null;
+  const sideAvatarNode = renderSideAvatarSlot(sideAvatarShown);
+  const avatarHeader = headerAvatarsVisible && showAvatarHeader ? (
+    <View
+      style={[
+        styles.messageAvatarHeader,
+        isUser ? styles.messageAvatarHeaderUser : styles.messageAvatarHeaderAssistant,
+        avatarHeaderCssStyle,
+      ]}
+    >
+      {!isUser && avatarNode}
+      {isUser && messageMetaVisible && <Text style={[styles.messageAvatarMeta, avatarMetaCssStyle]}>{avatarMetaText}</Text>}
+      <Text style={[styles.messageAvatarName, avatarNameCssStyle]} numberOfLines={1}>
+        {avatarName}
+      </Text>
+      {!isUser && messageMetaVisible && <Text style={[styles.messageAvatarMeta, avatarMetaCssStyle]}>{avatarMetaText}</Text>}
+      {isUser && avatarNode}
+    </View>
+  ) : null;
+  const messageAvailableWidth = SCREEN_WIDTH - 32 - (sideAvatarsVisible ? MESSAGE_AVATAR_SIZE + 8 : 0);
+
+  if (message.role === 'system') {
+    return (
+      <Pressable
+        style={styles.systemRow}
+        onLongPress={() => {
+          Alert.alert('删除', '确定删除这条系统消息？', [
+            { text: '取消', style: 'cancel' },
+            { text: '删除', style: 'destructive', onPress: () => removeMessage(message.id) },
+          ]);
+        }}
+      >
+        <Text style={styles.systemText}>{message.content}</Text>
+      </Pressable>
+    );
+  }
+
+  function handleUserLongPress() {
+    // 测量气泡在屏幕中的位置，再据此定位菜单
+    bubbleRef.current?.measureInWindow((x, y, width, height) => {
+      setMenuAnchor({ x, y, width, height });
+      setMenuVisible(true);
+    });
+  }
+
+  function openUserEdit() {
+    setMenuVisible(false);
+    setEditTargetId(message.id);
+    setEditText(buildVoiceEditText(message.content, message.voiceAttachment));
+    setEditModalVisible(true);
+  }
+
+  function deleteUserMessage() {
+    setMenuVisible(false);
+    removeMessage(message.id);
+  }
+
+  function openSharedLinkCard() {
+    if (!sharedLinkUrl) return;
+    openWebView(sharedLinkUrl).catch((error) => {
+      Alert.alert('打开失败', error?.message || '无法打开链接');
+    });
+  }
+
+  function toggleCurrentFloorHidden(closeMenu: () => void) {
+    closeMenu();
+    if (!canToggleFloorHidden || floorNumber === undefined) return;
+
+    const operation = isHidden
+      ? Promise.all([
+          restoreHiddenRange({ from: floorNumber, to: floorNumber }),
+          setMessageHidden(message.id, false),
+        ])
+      : addHiddenRange({ from: floorNumber, to: floorNumber });
+
+    operation.catch((error) => {
+      Alert.alert(isHidden ? '恢复失败' : '隐藏失败', error?.message || '操作失败');
+    });
+  }
+
+  // 编辑弹窗（两个分支共用）
+  const editModal = (
+    <Modal visible={editModalVisible} transparent animationType="fade">
+      <Pressable style={styles.overlay} onPress={() => setEditModalVisible(false)}>
+        <View style={styles.modal} onStartShouldSetResponder={() => true}>
+          <Text style={styles.modalTitle}>
+            {editTargetId === message.id && !isUser ? '编辑 AI 消息' : '编辑用户消息'}
+          </Text>
+          <TextInput
+            style={styles.modalInput}
+            value={editText}
+            onChangeText={setEditText}
+            multiline
+            autoFocus
+          />
+          <View style={styles.modalButtons}>
+            <Pressable style={styles.modalCancel} onPress={() => setEditModalVisible(false)}>
+              <Text style={styles.modalCancelText}>取消</Text>
+            </Pressable>
+            <Pressable style={styles.modalConfirm} onPress={handleSaveEdit}>
+              <Text style={styles.modalConfirmText}>保存</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Pressable>
+    </Modal>
+  );
+  const imagePreviewModal = (
+    <Modal
+      transparent
+      visible={!!previewImage}
+      animationType="fade"
+      onRequestClose={() => setPreviewImage(null)}
+    >
+      <Pressable style={styles.imagePreviewOverlay} onPress={() => setPreviewImage(null)}>
+        <View style={styles.imagePreviewFrame} onStartShouldSetResponder={() => true}>
+          <Image
+            source={{ uri: previewImage?.uri || '' }}
+            style={styles.imagePreview}
+            resizeMode="contain"
+          />
+          {!!previewImage?.title && (
+            <Text style={styles.imagePreviewTitle} numberOfLines={2}>
+              {previewImage.title}
+            </Text>
+          )}
+          <Pressable style={styles.imagePreviewClose} onPress={() => setPreviewImage(null)}>
+            <Text style={styles.imagePreviewCloseText}>关闭</Text>
+          </Pressable>
+        </View>
+      </Pressable>
+    </Modal>
+  );
+  const dailyPaperModal = (
+    <Modal
+      transparent
+      visible={dailyPaperVisible}
+      animationType="fade"
+      onRequestClose={() => setDailyPaperVisible(false)}
+    >
+      <Pressable style={styles.dailyPaperModalOverlay} onPress={() => setDailyPaperVisible(false)}>
+        <View style={styles.dailyPaperModal} onStartShouldSetResponder={() => true}>
+          <Text style={styles.dailyPaperModalTitle}>{dailyPaperCard?.title || '每日日报'}</Text>
+          <Text style={styles.dailyPaperModalDate}>{dailyPaperCard?.dateKey || ''}</Text>
+          <ScrollView style={styles.dailyPaperModalBody}>
+            <Text selectable style={styles.dailyPaperModalText}>{dailyPaperCard?.body || ''}</Text>
+            {!!dailyPaperCard?.sources.length && (
+              <View style={styles.dailyPaperModalSources}>
+                <Text style={styles.dailyPaperModalSourceTitle}>来源</Text>
+                {dailyPaperCard.sources.map((source, index) => (
+                  <Text key={`${source.url}-${index}`} selectable style={styles.dailyPaperModalSourceText}>
+                    {index + 1}. {source.title}{source.sourceName ? ` · ${source.sourceName}` : ''}{source.url ? `\n${source.url}` : ''}
+                  </Text>
+                ))}
+              </View>
+            )}
+          </ScrollView>
+          <Pressable style={styles.imagePreviewClose} onPress={() => setDailyPaperVisible(false)}>
+            <Text style={styles.imagePreviewCloseText}>关闭</Text>
+          </Pressable>
+        </View>
+      </Pressable>
+    </Modal>
+  );
+  if (isUser) {
+    // 菜单宽度估算，用于让菜单右对齐气泡右缘
+    const MENU_WIDTH = 216;
+    const MENU_HEIGHT = 44;
+    const menuLeft = Math.max(8, menuAnchor.x + menuAnchor.width - MENU_WIDTH);
+    const menuTop = Math.max(8, menuAnchor.y - MENU_HEIGHT - 8);
+    const userBubbleMaxWidth = Math.round(messageAvailableWidth * (userBubbleWidthPercent / 100));
+    const expandUserMarkdownBlockBubble = shouldExpandMarkdownBlockBubble(message.content);
+    const voiceAttachment = message.voiceAttachment;
+    const locationAttachment = message.locationAttachment;
+    const voiceToken = voiceAttachment ? `[Voice:${voiceAttachment.id}]` : '';
+    const isVoiceOnlyMessage = !!voiceAttachment && message.content.trim() === voiceToken;
+    const userStickerOnlyMessage = messageIsStickerOnly && !dailyPaperCard && !sharedLinkUrl;
+    const userBubbleBaseStyle = [
+      styles.userBubble,
+      {
+        maxWidth: '100%' as const,
+        ...(expandUserMarkdownBlockBubble ? { width: userBubbleMaxWidth } : null),
+        backgroundColor: userBubbleGlass.enabled
+          ? 'rgba(255,255,255,0.28)'
+          : userBubbleTransparent ? 'transparent' : userBubbleColor,
+        borderRadius: userBubbleRadius,
+        borderWidth: userBubbleTransparent || userBubbleGlass.enabled ? 0 : colors.bubbleBorderWidth,
+        borderColor: colors.bubbleBorder,
+      },
+      messageHasSticker && styles.userBubbleWithSticker,
+      withoutAppearanceGlassProps(userBubbleCssStyle),
+    ];
+    const userContentPressableStyle = userStickerOnlyMessage
+      ? styles.userStickerOnlyMessage
+      : userBubbleBaseStyle;
+    const userBubbleTailStyle = [
+      styles.bubbleTail,
+      styles.userBubbleTail,
+      { borderLeftColor: userBubbleTransparent ? 'transparent' : userBubbleColor },
+      userBubbleTailCssStyle,
+    ];
+    const userBubbleTailSvgStyle = [
+      styles.bubbleTailSvg,
+      styles.userBubbleTailSvg,
+      { color: userBubbleTransparent ? 'transparent' : userBubbleColor },
+      userBubbleTailSvgCssStyle,
+    ];
+
+    const userColumnNode = (
+      <View
+        style={[
+          styles.userColumn,
+          { maxWidth: userBubbleMaxWidth },
+          customCssStyles.userBubble?.maxWidth !== undefined && { maxWidth: customCssStyles.userBubble.maxWidth },
+          customCssStyles.userMessage,
+          cssStyle('.user-message', '.chat-user-message', '.chat-user-column'),
+        ]}
+      >
+          {assistantReactionEmoji && (
+            <View pointerEvents="none" style={styles.userReactionBadge}>
+              <Text style={styles.reactionBadgeEmoji}>{assistantReactionEmoji}</Text>
+            </View>
+          )}
+          {avatarHeader}
+          {floorLabel && <Text style={styles.floorLabelRight}>{floorLabel}</Text>}
+          {isHidden && <Text style={styles.hiddenLabelRight}>已隐藏</Text>}
+          {locationAttachment && (
+            <Pressable
+              ref={bubbleRef}
+              onPress={handleBubbleTap}
+              onLongPress={handleUserLongPress}
+            >
+              <LocationCard location={locationAttachment} />
+            </Pressable>
+          )}
+          {message.imageUri && (
+            <Pressable
+              ref={!message.content ? bubbleRef : undefined}
+              onPress={() => setPreviewImage({ uri: message.imageUri!, title: '用户发送的图片' })}
+              onLongPress={!message.content ? handleUserLongPress : undefined}
+            >
+              <Image
+                source={{ uri: message.imageUri }}
+                style={[styles.userImage, imageCssStyle('.user-image', '.chat-user-image')]}
+                resizeMode="cover"
+              />
+            </Pressable>
+          )}
+          {message.imageGenerationReferenceUris && message.imageGenerationReferenceUris.length > 0 && (
+            <View style={styles.referenceImagesBlock}>
+              <Text style={styles.referenceImagesLabel}>生图参考图</Text>
+              <View style={styles.referenceImagesList}>
+                {message.imageGenerationReferenceUris.slice(0, 16).map((uri, index) => (
+                  <Pressable
+                    key={`${uri}-${index}`}
+                    onPress={() => setPreviewImage({ uri, title: `生图参考图 ${index + 1}` })}
+                  >
+                    <Image source={{ uri }} style={[styles.referenceImageThumb, imageCssStyle('.reference-image', '.chat-reference-image')]} resizeMode="cover" />
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+          )}
+          {voiceAttachment && (
+            <>
+              <Pressable
+                ref={isVoiceOnlyMessage ? bubbleRef : undefined}
+                onPress={handleVoicePress}
+                onLongPress={handleUserLongPress}
+                style={[userBubbleBaseStyle, styles.voiceBubble]}
+              >
+                {userBubbleGlass.enabled && (
+                  <AppearanceBlurView
+                    config={userBubbleGlass}
+                    blurTarget={blurTarget}
+                    style={getBubbleBlurStyle(userBubbleBaseStyle)}
+                  />
+                )}
+                <View pointerEvents="none" style={userBubbleTailStyle} />
+                {showBubbleTail && (
+                  <BubbleTailSvg side="user" style={userBubbleTailSvgStyle} fallbackColor={userBubbleTransparent ? 'transparent' : userBubbleColor} />
+                )}
+                <View style={styles.voiceIconCircle}>
+                  <Text style={styles.voiceIconText}>{playingVoiceId === voiceAttachment.id ? 'II' : '>'}</Text>
+                </View>
+                <View style={styles.voiceWave}>
+                  <View style={[styles.voiceWaveBar, styles.voiceWaveBarShort]} />
+                  <View style={styles.voiceWaveBar} />
+                  <View style={[styles.voiceWaveBar, styles.voiceWaveBarTall]} />
+                  <View style={styles.voiceWaveBar} />
+                  <View style={[styles.voiceWaveBar, styles.voiceWaveBarShort]} />
+                </View>
+                <Text style={[userTextStyle, styles.voiceDuration]}>{formatVoiceDuration(voiceAttachment.durationMs)}</Text>
+              </Pressable>
+              <Text
+                style={[
+                  styles.voiceTranscript,
+                  voiceAttachment.transcriptStatus === 'failed' && styles.voiceTranscriptFailed,
+                ]}
+              >
+                {voiceAttachment.transcriptStatus === 'completed'
+                  ? voiceAttachment.transcript || ''
+                  : voiceAttachment.transcriptStatus === 'failed'
+                    ? `转写失败：${voiceAttachment.errorMessage || '点击重新录制'}`
+                    : '正在转文字...'}
+              </Text>
+            </>
+          )}
+          {message.content.length > 0 && !isVoiceOnlyMessage && !locationAttachment && (
+            <Pressable
+              ref={bubbleRef}
+              onPress={dailyPaperCard ? () => setDailyPaperVisible(true) : sharedLinkUrl ? openSharedLinkCard : handleBubbleTap}
+              onLongPress={handleUserLongPress}
+              style={userContentPressableStyle}
+            >
+              {!userStickerOnlyMessage && userBubbleGlass.enabled && (
+                <AppearanceBlurView
+                  config={userBubbleGlass}
+                  blurTarget={blurTarget}
+                  style={getBubbleBlurStyle(userBubbleBaseStyle)}
+                />
+              )}
+              {!userStickerOnlyMessage && <View pointerEvents="none" style={userBubbleTailStyle} />}
+              {showBubbleTail && !userStickerOnlyMessage && (
+                <BubbleTailSvg side="user" style={userBubbleTailSvgStyle} fallbackColor={userBubbleTransparent ? 'transparent' : userBubbleColor} />
+              )}
+              {dailyPaperCard ? (
+                <DailyPaperForwardCard paper={dailyPaperCard} />
+              ) : sharedLinkUrl ? (
+                <SharedLinkCard url={sharedLinkUrl} />
+              ) : (
+                <StickerContent
+                  content={message.content}
+                  variant="user"
+                  userTextStyle={userTextStyle}
+                  markdownStyle={userMarkdownStyles}
+                  markdownRules={markdownRules}
+                  stickers={messageStickers}
+                />
+              )}
+            </Pressable>
+          )}
+          {message.content.length === 0 && !message.imageUri && !message.voiceAttachment && !locationAttachment && !(message.imageGenerationReferenceUris?.length) && (
+            <Pressable
+              ref={bubbleRef}
+              onPress={handleBubbleTap}
+              onLongPress={handleUserLongPress}
+              style={userBubbleBaseStyle}
+            >
+              {userBubbleGlass.enabled && (
+                <AppearanceBlurView
+                  config={userBubbleGlass}
+                  blurTarget={blurTarget}
+                  style={getBubbleBlurStyle(userBubbleBaseStyle)}
+                />
+              )}
+              <View pointerEvents="none" style={userBubbleTailStyle} />
+              <Text style={[styles.userText, userTextStyle]}>{message.content}</Text>
+            </Pressable>
+          )}
+      </View>
+    );
+
+    return (
+      <View style={[styles.userRow, cssStyle('.user-row', '.chat-user-row'), isHidden && styles.hiddenRow]}>
+        {sideAvatarsVisible ? (
+          <View
+            style={[
+              styles.userSideMessageRow,
+              cssStyle('.message-avatar-side-row', '.user-avatar-side-row'),
+            ]}
+          >
+            {userColumnNode}
+            {sideAvatarNode}
+          </View>
+        ) : userColumnNode}
+        {/* 长按操作菜单 */}
+        <Modal transparent visible={menuVisible} animationType="fade" onRequestClose={() => setMenuVisible(false)}>
+          <Pressable style={styles.menuDismissOverlay} onPress={() => setMenuVisible(false)}>
+            <View style={[styles.bubbleMenu, { left: menuLeft, top: menuTop }]}>
+              <Pressable style={styles.bubbleMenuItem} onPress={openUserEdit}>
+                <Text style={styles.bubbleMenuText}>编辑</Text>
+              </Pressable>
+              <View style={styles.bubbleMenuDivider} />
+              <Pressable
+                style={[styles.bubbleMenuItem, !canToggleFloorHidden && styles.bubbleMenuItemDisabled]}
+                onPress={() => toggleCurrentFloorHidden(() => setMenuVisible(false))}
+                disabled={!canToggleFloorHidden}
+              >
+                <Text style={[styles.bubbleMenuText, !canToggleFloorHidden && styles.bubbleMenuTextDisabled]}>
+                  {hiddenToggleText}
+                </Text>
+              </Pressable>
+              <View style={styles.bubbleMenuDivider} />
+              <Pressable style={styles.bubbleMenuItem} onPress={deleteUserMessage}>
+                <Text style={[styles.bubbleMenuText, styles.bubbleMenuTextDanger]}>删除</Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Modal>
+
+        {editModal}
+        {imagePreviewModal}
+        {dailyPaperModal}
+      </View>
+    );
+  }
+
+  const userMsgBefore = previousUserMessage ?? null;
+
+  // 拆分思维链与正文：<thinking> 内容进胶囊，正文只渲染剩余部分
+  const { thinking, body } = splitThinking(message.content);
+  const thinkingParts = extractThinkingParts(message.content);
+  const summaryTools = message.toolInvocations || [];
+  const getNumberedToolTitle = (invocation: ToolInvocation, invocationIndex: number) => {
+    const title = formatToolInvocation(invocation.name, invocation.args);
+    const duplicateCount = summaryTools.filter((item) => item.name === invocation.name).length;
+    if (duplicateCount <= 1) return title;
+    const ordinal = summaryTools
+      .slice(0, invocationIndex + 1)
+      .filter((item) => item.name === invocation.name).length;
+    return `${title} #${ordinal}`;
+  };
+  const openSummary = () => {
+    setSummaryDetail(null);
+    setSummaryMaskVisible(false);
+    setSummaryVisible(true);
+    summaryTranslateY.setValue(Dimensions.get('window').height);
+    requestAnimationFrame(() => {
+      Animated.timing(summaryTranslateY, {
+        toValue: 0,
+        duration: 260,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }).start(({ finished }) => {
+        if (finished) setSummaryMaskVisible(true);
+      });
+    });
+  };
+  const closeSummary = () => {
+    setSummaryMaskVisible(false);
+    Animated.timing(summaryTranslateY, {
+      toValue: Dimensions.get('window').height,
+      duration: 220,
+      easing: Easing.in(Easing.cubic),
+      useNativeDriver: true,
+    }).start(() => {
+      setSummaryVisible(false);
+      setSummaryDetail(null);
+    });
+  };
+  const assistantFlowParts = buildAssistantFlowParts(message.content, body, message.toolInvocations);
+  const assistantBubbleFlowParts = assistantBubbleStyle === 'bubble'
+    ? buildAssistantBubbleFlowParts(assistantFlowParts, messageStickers)
+    : assistantFlowParts;
+  const firstAssistantBubblePartIndex = assistantBubbleFlowParts.findIndex(
+    (part) => part.type === 'text'
+  );
+  const lastAssistantBubblePartIndex = assistantBubbleFlowParts.reduce(
+    (lastIndex, part, partIndex) => part.type === 'text' ? partIndex : lastIndex,
+    -1
+  );
+  const assistantAvatarPartIndex = appearanceConfig?.sideAvatarDisplayMode === 'last'
+    ? lastAssistantBubblePartIndex
+    : firstAssistantBubblePartIndex;
+  const showAvatarOnEveryAssistantBubble =
+    (appearanceConfig?.sideAvatarDisplayMode || 'every') === 'every';
+  const remoteActivityCardVisible = isRemoteActivityMessage(message);
+
+  async function handleAction(index: number) {
+    switch (index) {
+      case 0: // 复制 AI 完整回复
+        try {
+          await Clipboard.setStringAsync(message.content);
+          Alert.alert('已复制', '已复制 AI 的完整回复');
+        } catch (error: any) {
+          Alert.alert('复制失败', error?.message || '无法复制这条回复');
+        }
+        break;
+      case 1: // 收藏
+        try {
+          const nextFavorite = !isFavorite;
+          await setMessageFavorite(message.id, nextFavorite);
+          setIsFavorite(nextFavorite);
+        } catch (error: any) {
+          Alert.alert('收藏失败', error?.message || '无法更新收藏');
+        }
+        break;
+      case 2: // TTS 播放
+        const ttsConfig = useSettingsStore.getState().ttsConfig;
+        if (!isTTSConfigReady(ttsConfig)) {
+          Alert.alert('提示', getTTSConfigMissingMessage(ttsConfig));
+        } else {
+          setIsTTSPlaying(true);
+          try {
+            await playTTSAndWait(message.content, ttsConfig);
+          } catch (e: any) {
+            Alert.alert('TTS 失败', e?.message || '无法播放这条回复');
+          } finally {
+            setIsTTSPlaying(false);
+          }
+        }
+        break;
+      case 3: // 正面 reaction
+        if (isLastAssistant) setReactionPicker('positive');
+        break;
+      case 4: // 负面 reaction
+        if (isLastAssistant) setReactionPicker('negative');
+        break;
+      case 5: // 重新生成
+        if (isLastAssistant) regenerate();
+        break;
+    }
+  }
+
+  function handleAssistantLongPress() {
+    bubbleRef.current?.measureInWindow((x, y, width, height) => {
+      setMenuAnchor({ x, y, width, height });
+      setAssistantMenuVisible(true);
+    });
+  }
+
+  function handleAssistantBubbleLongPress(event: any) {
+    const pageX = typeof event?.nativeEvent?.pageX === 'number' ? event.nativeEvent.pageX : 16;
+    const pageY = typeof event?.nativeEvent?.pageY === 'number' ? event.nativeEvent.pageY : 16;
+    setMenuAnchor({ x: pageX, y: pageY, width: 0, height: 0 });
+    setAssistantMenuVisible(true);
+  }
+
+  function handleGeneratedPictureLongPress(picture: GeneratedPicture) {
+    setPictureActionTarget(picture);
+  }
+
+  function handleGeneratedPicturePress(picture: GeneratedPicture) {
+    if (!picture.imageUri) return;
+    setPreviewImage({ uri: picture.imageUri, title: picture.prompt || 'AI 生成图片' });
+  }
+
+  function renderToolInvocation(inv: ToolInvocation, invocationIndex: number) {
+    return (
+      <View
+        key={`tool-${invocationIndex}`}
+        style={styles.toolInlineItem}
+      >
+        <Pressable
+          style={styles.toolRow}
+          onPress={openSummary}
+          onLongPress={() => {
+            Alert.alert('删除', '确定删除该工具调用记录？', [
+              { text: '取消', style: 'cancel' },
+              { text: '删除', style: 'destructive', onPress: () => removeToolInvocation(message.id, invocationIndex) },
+            ]);
+          }}
+        >
+          <Image
+            source={require('../../assets/tool.png')}
+            style={styles.toolIconLeft}
+            resizeMode="contain"
+          />
+          <Text style={styles.toolText} numberOfLines={1}>
+            {getNumberedToolTitle(inv, invocationIndex)}{inv.status === 'running' ? '（执行中）' : ''}
+          </Text>
+          <Image
+            source={require('../../assets/arrow-right.png')}
+            style={styles.toolIconRight}
+            resizeMode="contain"
+          />
+        </Pressable>
+      </View>
+    );
+  }
+
+  async function runPictureAction(action: 'regenerate' | 'delete-image' | 'delete-token' | 'download') {
+    const target = pictureActionTarget;
+    if (!target || pictureActionBusy) return;
+    setPictureActionBusy(true);
+    try {
+      if (action === 'regenerate') {
+        await regenerateGeneratedPicture(message.id, target.tokenIndex);
+      } else if (action === 'delete-image') {
+        await deleteGeneratedPictureOnly(message.id, target.tokenIndex);
+      } else if (action === 'delete-token') {
+        await deleteGeneratedPictureAndPrompt(message.id, target.tokenIndex);
+      } else {
+        if (!target.imageUri) {
+          throw new Error('这张图片还没有可下载的文件');
+        }
+        await saveGeneratedImageToLibrary(target.imageUri);
+      }
+      setPictureActionTarget(null);
+    } catch (error: any) {
+      Alert.alert('操作失败', error?.message || '图片操作失败');
+    } finally {
+      setPictureActionBusy(false);
+    }
+  }
+
+  function handleAssistantMenuAction(index: number) {
+    setAssistantMenuVisible(false);
+    handleAction(index);
+  }
+
+  function openAssistantEdit() {
+    setAssistantMenuVisible(false);
+    setEditTargetId(message.id);
+    setEditText(buildVoiceEditText(message.content, message.voiceAttachment));
+    setEditModalVisible(true);
+  }
+
+  function deleteAssistantMessage() {
+    setAssistantMenuVisible(false);
+    void removeMessage(message.id);
+  }
+
+  function handleSaveEdit() {
+    if (editTargetId && editText.trim()) {
+      const editTargetMessage =
+        editTargetId === message.id ? message :
+        editTargetId === userMsgBefore?.id ? userMsgBefore :
+        null;
+      if (editTargetMessage?.voiceAttachment) {
+        editVoiceTranscript(editTargetId, editText.trim());
+      } else {
+        editMessage(editTargetId, editText.trim());
+      }
+    }
+    setEditModalVisible(false);
+    setEditTargetId(null);
+  }
+
+  const assistantBubbleEnabled = assistantBubbleStyle === 'bubble';
+  const assistantBubbleMaxWidth = Math.round(messageAvailableWidth * (assistantBubbleWidthPercent / 100));
+  const assistantBubbleBaseStyle = [
+    styles.assistantBubble,
+    {
+      maxWidth: assistantBubbleMaxWidth,
+      backgroundColor: assistantBubbleGlass.enabled
+        ? 'rgba(255,255,255,0.24)'
+        : assistantBubbleTransparent ? 'transparent' : assistantBubbleColor,
+      borderRadius: assistantBubbleRadius,
+      borderWidth: assistantBubbleTransparent || assistantBubbleGlass.enabled ? 0 : colors.bubbleBorderWidth,
+      borderColor: colors.bubbleBorder,
+    },
+    withoutAppearanceGlassProps(assistantBubbleCssStyle),
+  ];
+  const assistantBubbleTailStyle = [
+    styles.bubbleTail,
+    styles.assistantBubbleTail,
+    { borderRightColor: assistantBubbleTransparent ? 'transparent' : assistantBubbleColor },
+    assistantBubbleTailCssStyle,
+  ];
+  const assistantBubbleTailSvgStyle = [
+    styles.bubbleTailSvg,
+    styles.assistantBubbleTailSvg,
+    { color: assistantBubbleTransparent ? 'transparent' : assistantBubbleColor },
+    assistantBubbleTailSvgCssStyle,
+  ];
+  const assistantContentStyle = [
+    styles.assistantContent,
+    sideAvatarsVisible && styles.assistantSideContent,
+    withoutAppearanceGlassProps(customCssStyles.assistantBubble),
+    cssStyle('.assistant-content', '.chat-assistant-content'),
+  ];
+  const ASSISTANT_MENU_WIDTH = Math.min(340, SCREEN_WIDTH - 16);
+  const assistantActionMenuWidth = remoteActivityCardVisible ? Math.min(260, SCREEN_WIDTH - 16) : ASSISTANT_MENU_WIDTH;
+  const assistantMenuLeft = Math.min(
+    Math.max(8, menuAnchor.x),
+    SCREEN_WIDTH - assistantActionMenuWidth - 8
+  );
+  const assistantMenuTop = Math.max(8, menuAnchor.y + menuAnchor.height + 8);
+  function getAssistantBubbleStyle(content: string) {
+    if (isStickerOnlyContent(content, messageStickers)) {
+      return [
+        styles.assistantBubble,
+        { maxWidth: assistantBubbleMaxWidth },
+        styles.userStickerOnlyBubble,
+      ];
+    }
+
+    return [
+      ...assistantBubbleBaseStyle,
+      shouldExpandMarkdownBlockBubble(content) && { width: assistantBubbleMaxWidth },
+      hasStickerToken(content, messageStickers) && styles.userBubbleWithSticker,
+    ];
+  }
+
+  function renderAssistantSideRow(key: string, node: React.ReactNode, displayAvatar = sideAvatarShown) {
+    if (!sideAvatarsVisible) return node;
+    return (
+      <View
+        key={key}
+        style={[
+          styles.assistantSideMessageRow,
+          cssStyle('.message-avatar-side-row', '.assistant-avatar-side-row'),
+        ]}
+      >
+        {displayAvatar ? sideAvatarNode : renderSideAvatarSlot(false)}
+        {node}
+      </View>
+    );
+  }
+
+  return (
+    <View
+      style={[
+        styles.assistantRow,
+        customCssStyles.assistantMessage,
+        cssStyle('.assistant-message', '.assistant-row', '.chat-assistant-row'),
+        isHidden && styles.hiddenBubble,
+      ]}
+    >
+      {avatarHeader}
+      {floorLabel && <Text style={styles.floorLabelLeft}>{floorLabel}</Text>}
+      {isHidden && <Text style={styles.hiddenLabelLeft}>已隐藏</Text>}
+      {/* 思维链：<thinking> 包裹的内容拆出，正文只渲染剩余部分 */}
+      {thinking.length > 0 && renderAssistantSideRow(
+        'assistant-thinking',
+        <ThinkingBlock thinking={thinking} onPress={openSummary} />,
+        false
+      )}
+      {remoteActivityCardVisible ? (
+        renderAssistantSideRow(
+          'remote-activity',
+          <RemoteActivityCard
+            message={message}
+            assistantName={assistantDisplayName}
+            onPress={handleBubbleTap}
+            onLongPress={handleAssistantBubbleLongPress}
+          />
+        )
+      ) : assistantBubbleEnabled ? (
+        <View
+          style={[
+            styles.assistantBubbleStack,
+            cssStyle('.assistant-bubble-stack', '.chat-assistant-bubble-stack'),
+          ]}
+        >
+          {assistantBubbleFlowParts.length > 0 ? assistantBubbleFlowParts.map((part, partIndex) => {
+            if (part.type === 'tool') {
+              return renderAssistantSideRow(
+                part.key,
+                renderToolInvocation(part.invocation, part.invocationIndex),
+                false
+              );
+            }
+
+            const pictureCount = countPicTokens(part.content);
+            const stickerOnlyPart = isStickerOnlyContent(part.content, messageStickers);
+            const partShowsBubbleTail = showBubbleTail && partIndex === lastAssistantBubblePartIndex;
+            const bubbleNode = (
+              <Pressable
+                key={sideAvatarsVisible ? undefined : part.key}
+                style={getAssistantBubbleStyle(part.content)}
+                onPress={handleBubbleTap}
+                onLongPress={handleAssistantBubbleLongPress}
+              >
+                {assistantBubbleGlass.enabled && !stickerOnlyPart && (
+                  <AppearanceBlurView
+                    config={assistantBubbleGlass}
+                    blurTarget={blurTarget}
+                    style={getBubbleBlurStyle(getAssistantBubbleStyle(part.content))}
+                  />
+                )}
+                {!stickerOnlyPart && <View pointerEvents="none" style={assistantBubbleTailStyle} />}
+                {partShowsBubbleTail && !stickerOnlyPart && (
+                  <BubbleTailSvg side="assistant" style={assistantBubbleTailSvgStyle} fallbackColor={assistantBubbleTransparent ? 'transparent' : assistantBubbleColor} />
+                )}
+                <StickerContent
+                  content={part.content}
+                  variant="assistant"
+                  markdownStyle={assistantBubbleMarkdownStyles}
+                  markdownRules={markdownRules}
+                  stickers={messageStickers}
+                  generatedPics={normalizeGeneratedPicsForSegment(message.generatedPics, part.pictureOffset, pictureCount)}
+                  onPicturePress={handleGeneratedPicturePress}
+                  onPictureLongPress={handleGeneratedPictureLongPress}
+                />
+              </Pressable>
+            );
+            return sideAvatarsVisible
+              ? renderAssistantSideRow(
+                  part.key,
+                  bubbleNode,
+                  sideAvatarShown && (
+                    showAvatarOnEveryAssistantBubble || partIndex === assistantAvatarPartIndex
+                  )
+                )
+              : bubbleNode;
+          }) : (
+            renderAssistantSideRow(
+              'assistant-empty',
+              <Pressable
+                style={getAssistantBubbleStyle(' ')}
+                onPress={handleBubbleTap}
+                onLongPress={handleAssistantBubbleLongPress}
+              >
+                {assistantBubbleGlass.enabled && (
+                  <AppearanceBlurView
+                    config={assistantBubbleGlass}
+                    blurTarget={blurTarget}
+                    style={getBubbleBlurStyle(getAssistantBubbleStyle(' '))}
+                  />
+                )}
+                <View pointerEvents="none" style={assistantBubbleTailStyle} />
+                {showBubbleTail && (
+                  <BubbleTailSvg side="assistant" style={assistantBubbleTailSvgStyle} fallbackColor={assistantBubbleTransparent ? 'transparent' : assistantBubbleColor} />
+                )}
+                <StickerContent
+                  content=" "
+                  variant="assistant"
+                  markdownStyle={assistantBubbleMarkdownStyles}
+                  markdownRules={markdownRules}
+                  stickers={messageStickers}
+                  generatedPics={message.generatedPics}
+                  onPicturePress={handleGeneratedPicturePress}
+                  onPictureLongPress={handleGeneratedPictureLongPress}
+                />
+              </Pressable>
+            )
+          )}
+        </View>
+      ) : (
+        renderAssistantSideRow(
+          'assistant-content',
+          <Pressable
+            ref={bubbleRef}
+            style={assistantContentStyle}
+            onPress={handleBubbleTap}
+            onLongPress={handleAssistantLongPress}
+          >
+            <View style={styles.assistantFlow}>
+              {assistantFlowParts.length > 0 ? assistantFlowParts.map((part) => {
+                if (part.type === 'tool') {
+                  return renderToolInvocation(part.invocation, part.invocationIndex);
+                }
+
+                const pictureCount = countPicTokens(part.content);
+                return (
+                  <StickerContent
+                    key={part.key}
+                    content={part.content}
+                    variant="assistant"
+                    markdownStyle={markdownStyles}
+                    markdownRules={markdownRules}
+                    stickers={messageStickers}
+                    generatedPics={normalizeGeneratedPicsForSegment(message.generatedPics, part.pictureOffset, pictureCount)}
+                    onPicturePress={handleGeneratedPicturePress}
+                    onPictureLongPress={handleGeneratedPictureLongPress}
+                  />
+                );
+              }) : (
+                <StickerContent
+                  content=" "
+                  variant="assistant"
+                  markdownStyle={markdownStyles}
+                  markdownRules={markdownRules}
+                  stickers={messageStickers}
+                  generatedPics={message.generatedPics}
+                  onPicturePress={handleGeneratedPicturePress}
+                  onPictureLongPress={handleGeneratedPictureLongPress}
+                />
+              )}
+            </View>
+          </Pressable>
+        )
+      )}
+      <Modal
+        transparent
+        visible={summaryVisible}
+        animationType="none"
+        onRequestClose={closeSummary}
+      >
+        <View style={styles.summaryOverlay}>
+          <Pressable
+            style={[styles.summaryBackdrop, summaryMaskVisible && styles.summaryOverlayVisible]}
+            onPress={closeSummary}
+          />
+          <Animated.View
+            style={[styles.summarySheet, { transform: [{ translateY: summaryTranslateY }] }]}
+          >
+            <View style={styles.summaryHandle} />
+            <View style={styles.summaryHeader}>
+              <Pressable
+                style={styles.summaryHeaderButton}
+                onPress={summaryDetail ? () => setSummaryDetail(null) : closeSummary}
+                hitSlop={10}
+              >
+                <Text style={styles.summaryHeaderButtonText}>{summaryDetail ? '‹' : '×'}</Text>
+              </Pressable>
+              <Text style={styles.summaryTitle} numberOfLines={1}>
+                {summaryDetail
+                  ? summaryDetail.type === 'thinking' ? `Thinking ${summaryDetail.index + 1}` : getNumberedToolTitle(summaryDetail.invocation, summaryDetail.index)
+                  : 'Summary'}
+              </Text>
+              <View style={styles.summaryHeaderButton} />
+            </View>
+
+            {summaryDetail ? (
+              <ScrollView
+                style={styles.summaryBody}
+                contentContainerStyle={styles.summaryDetailContent}
+                showsVerticalScrollIndicator
+                nestedScrollEnabled
+                keyboardShouldPersistTaps="handled"
+              >
+                {summaryDetail.type === 'thinking' ? (
+                  <Markdown style={markdownStyles} rules={markdownRules} markdownit={latexMarkdownIt}>
+                    {summaryDetail.content}
+                  </Markdown>
+                ) : (
+                  <>
+                    <Text style={styles.summaryDetailLabel}>参数</Text>
+                    <Text style={[styles.summaryDetailText, summaryRegularTextStyle]} selectable>{formatDebugJson(summaryDetail.invocation.args)}</Text>
+                    <Text style={styles.summaryDetailLabel}>
+                      原始结果{summaryDetail.invocation.resultTokenEstimate
+                        ? `（约 ${summaryDetail.invocation.resultTokenEstimate} tokens）`
+                        : ''}
+                    </Text>
+                    <Text style={[styles.summaryDetailText, summaryRegularTextStyle]} selectable>{summaryDetail.invocation.result || '尚未返回结果'}</Text>
+                    {!!summaryDetail.invocation.compressedResult && (
+                      <>
+                        <Text style={styles.summaryDetailLabel}>跨轮压缩结果</Text>
+                        <Text style={[styles.summaryDetailText, summaryRegularTextStyle]} selectable>{summaryDetail.invocation.compressedResult}</Text>
+                      </>
+                    )}
+                    {!!summaryDetail.invocation.compressionError && (
+                      <>
+                        <Text style={styles.summaryDetailLabel}>压缩失败</Text>
+                        <Text style={[styles.summaryDetailText, summaryRegularTextStyle]} selectable>{summaryDetail.invocation.compressionError}</Text>
+                      </>
+                    )}
+                  </>
+                )}
+              </ScrollView>
+            ) : (
+              <ScrollView
+                style={styles.summaryBody}
+                contentContainerStyle={styles.summaryList}
+                showsVerticalScrollIndicator
+                nestedScrollEnabled
+                keyboardShouldPersistTaps="handled"
+              >
+                {thinkingParts.map((part, index) => (
+                  <Pressable
+                    key={`thinking-${index}`}
+                    style={styles.summaryListItem}
+                    onPress={() => setSummaryDetail({ type: 'thinking', index, content: part })}
+                  >
+                    <View style={styles.summaryBullet} />
+                    <Text style={[styles.summaryItemText, summaryRegularTextStyle]} numberOfLines={2}>{getThinkingPreview(part)}</Text>
+                    <Text style={styles.summaryChevron}>›</Text>
+                  </Pressable>
+                ))}
+                {summaryTools.map((invocation, index) => (
+                  <Pressable
+                    key={`tool-${index}`}
+                    style={styles.summaryListItem}
+                    onPress={() => setSummaryDetail({ type: 'tool', index, invocation })}
+                  >
+                    <View style={[styles.summaryBullet, styles.summaryToolBullet]} />
+                    <Text style={[styles.summaryItemText, summaryRegularTextStyle]} numberOfLines={2}>
+                      {getNumberedToolTitle(invocation, index)}{invocation.status === 'running' ? '（执行中）' : ''}
+                    </Text>
+                    <Text style={styles.summaryChevron}>›</Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+            )}
+          </Animated.View>
+        </View>
+      </Modal>
+      <Modal
+        transparent
+        visible={assistantMenuVisible}
+        animationType="fade"
+        onRequestClose={() => setAssistantMenuVisible(false)}
+      >
+        <Pressable style={styles.menuDismissOverlay} onPress={() => setAssistantMenuVisible(false)}>
+          <View style={[styles.bubbleMenu, styles.assistantActionMenu, { left: assistantMenuLeft, top: assistantMenuTop, width: assistantActionMenuWidth }]}>
+            <Pressable style={[styles.bubbleMenuItem, styles.assistantActionMenuItem]} onPress={openAssistantEdit}>
+              <Text style={styles.bubbleMenuText}>编辑</Text>
+            </Pressable>
+            <View style={styles.bubbleMenuDivider} />
+            <Pressable
+              style={[
+                styles.bubbleMenuItem,
+                styles.assistantActionMenuItem,
+                !canToggleFloorHidden && styles.bubbleMenuItemDisabled,
+              ]}
+              onPress={() => toggleCurrentFloorHidden(() => setAssistantMenuVisible(false))}
+              disabled={!canToggleFloorHidden}
+            >
+              <Text style={[styles.bubbleMenuText, !canToggleFloorHidden && styles.bubbleMenuTextDisabled]}>
+                {hiddenToggleText}
+              </Text>
+            </Pressable>
+            <View style={styles.bubbleMenuDivider} />
+            <Pressable style={[styles.bubbleMenuItem, styles.assistantActionMenuItem]} onPress={deleteAssistantMessage}>
+              <Text style={[styles.bubbleMenuText, styles.bubbleMenuTextDanger]}>删除</Text>
+            </Pressable>
+            {!remoteActivityCardVisible && (
+              <>
+                <View style={styles.bubbleMenuDivider} />
+                <Pressable style={[styles.bubbleMenuItem, styles.assistantActionMenuItem]} onPress={() => handleAssistantMenuAction(2)}>
+                  <Text style={styles.bubbleMenuText}>语音播放</Text>
+                </Pressable>
+                <View style={styles.bubbleMenuDivider} />
+                <Pressable
+                  style={[
+                    styles.bubbleMenuItem,
+                    styles.assistantActionMenuItem,
+                    !isLastAssistant && styles.bubbleMenuItemDisabled,
+                  ]}
+                  onPress={() => handleAssistantMenuAction(5)}
+                  disabled={!isLastAssistant}
+                >
+                  <Text style={[styles.bubbleMenuText, !isLastAssistant && styles.bubbleMenuTextDisabled]}>重生成</Text>
+                </Pressable>
+              </>
+            )}
+          </View>
+        </Pressable>
+      </Modal>
+      <Modal
+        transparent
+        visible={!!pictureActionTarget}
+        animationType="fade"
+        onRequestClose={() => setPictureActionTarget(null)}
+      >
+        <Pressable style={styles.menuDismissOverlay} onPress={() => setPictureActionTarget(null)}>
+          <View style={styles.pictureActionSheet} onStartShouldSetResponder={() => true}>
+            <Text style={styles.pictureActionTitle} numberOfLines={2}>
+              {pictureActionTarget?.prompt || 'AI 生成图片'}
+            </Text>
+            <Pressable
+              style={styles.pictureActionItem}
+              onPress={() => runPictureAction('regenerate')}
+              disabled={pictureActionBusy}
+            >
+              {pictureActionBusy ? <ActivityIndicator size="small" color={colors.primary} /> : <Text style={styles.pictureActionText}>重新生成图片</Text>}
+            </Pressable>
+            <Pressable
+              style={styles.pictureActionItem}
+              onPress={() => runPictureAction('download')}
+              disabled={pictureActionBusy || pictureActionTarget?.status !== 'done'}
+            >
+              <Text style={[styles.pictureActionText, pictureActionTarget?.status !== 'done' && styles.pictureActionTextDisabled]}>
+                下载到相册
+              </Text>
+            </Pressable>
+            <Pressable
+              style={styles.pictureActionItem}
+              onPress={() => runPictureAction('delete-image')}
+              disabled={pictureActionBusy}
+            >
+              <Text style={[styles.pictureActionText, styles.pictureActionTextDanger]}>只删除图片</Text>
+            </Pressable>
+            <Pressable
+              style={styles.pictureActionItem}
+              onPress={() => runPictureAction('delete-token')}
+              disabled={pictureActionBusy}
+            >
+              <Text style={[styles.pictureActionText, styles.pictureActionTextDanger]}>删除图片和 [Pic] 文本</Text>
+            </Pressable>
+            <Pressable
+              style={styles.pictureActionCancel}
+              onPress={() => setPictureActionTarget(null)}
+              disabled={pictureActionBusy}
+            >
+              <Text style={styles.pictureActionCancelText}>取消</Text>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Modal>
+      {message.content.length > 0 && !remoteActivityCardVisible && (
+        <>
+          {!assistantActionsHidden && (
+            <View
+              style={[
+                styles.actions,
+                { marginLeft: assistantBubbleEnabled ? 10 : -6 },
+                messageEndsWithSticker && styles.actionsAfterSticker,
+              ]}
+            >
+              {chatIcons.map((icon, i) => (
+                <Pressable
+                  key={i}
+                  style={styles.actionButton}
+                  onPress={(event) => {
+                    if (i !== 3 && i !== 4) {
+                      setReactionPicker(null);
+                    } else if (
+                      reactionPicker === (i === 3 ? 'positive' : 'negative')
+                    ) {
+                      setReactionPicker(null);
+                      return;
+                    } else {
+                      setReactionPickerAnchor({
+                        x: event.nativeEvent.pageX,
+                        y: event.nativeEvent.pageY,
+                      });
+                    }
+                    void handleAction(i);
+                  }}
+                  disabled={(i === 3 || i === 4) && !isLastAssistant}
+                >
+                  {userReactionEmoji && (
+                    (i === 3 && positiveReactions.includes(userReactionEmoji)) ||
+                    (i === 4 && negativeReactions.includes(userReactionEmoji))
+                  ) ? (
+                    <Text style={styles.reactionActionEmoji}>{userReactionEmoji}</Text>
+                  ) : (
+                    <Image
+                      source={i === 2 && isTTSPlaying ? chatTTSPlayingIcon : icon}
+                      style={[
+                        styles.actionImage,
+                        { tintColor: i === 1 && isFavorite ? colors.primary : assistantFooterColor },
+                      ]}
+                      resizeMode="contain"
+                    />
+                  )}
+                </Pressable>
+              ))}
+            </View>
+          )}
+          <Modal
+            transparent
+            visible={reactionPicker !== null && isLastAssistant}
+            animationType="fade"
+            statusBarTranslucent
+            onRequestClose={() => setReactionPicker(null)}
+          >
+            <View style={styles.reactionPickerOverlay}>
+              <Pressable
+                style={StyleSheet.absoluteFill}
+                onPress={() => setReactionPicker(null)}
+              />
+              <View
+                style={[
+                  styles.reactionPicker,
+                  {
+                    left: Math.max(12, Math.min(
+                      reactionPickerAnchor.x - 92,
+                      SCREEN_WIDTH - 196,
+                    )),
+                    top: Math.max(12, Math.min(
+                      reactionPickerAnchor.y + 18,
+                      SCREEN_HEIGHT - 54,
+                    )),
+                  },
+                ]}
+              >
+                <ScrollView
+                  horizontal
+                  nestedScrollEnabled
+                  bounces={false}
+                  directionalLockEnabled
+                  alwaysBounceHorizontal={false}
+                  showsHorizontalScrollIndicator={false}
+                  style={styles.reactionPickerScroll}
+                  contentContainerStyle={styles.reactionPickerContent}
+                >
+                  {(reactionPicker === 'negative' ? negativeReactions : positiveReactions).map((emoji) => (
+                    <Pressable
+                      key={emoji}
+                      style={styles.reactionPickerButton}
+                      onPress={() => {
+                        setReactionPicker(null);
+                        void setMessageReaction(message.id, 'user', emoji);
+                      }}
+                    >
+                      <Text style={styles.reactionPickerEmoji}>{emoji}</Text>
+                    </Pressable>
+                  ))}
+                </ScrollView>
+              </View>
+            </View>
+          </Modal>
+          {!assistantFooterHidden && showAssistantFooter && (
+            <View style={styles.logoRow}>
+              <Image source={require('../../assets/claudelogo.png')} style={styles.logoImage} resizeMode="contain" />
+              <Text style={[styles.disclaimerText, { color: assistantFooterColor }]}>
+                Claude is AI and can make mistakes.{'\n'}Please double-check responses.
+              </Text>
+            </View>
+          )}
+        </>
+      )}
+
+      {editModal}
+      {imagePreviewModal}
+    </View>
+  );
+});
+
+const createStyles = (colors: ThemeColors) => StyleSheet.create({
+  userRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    paddingHorizontal: 16,
+    marginVertical: 8,
+    minWidth: 0,
+  },
+  // 用户气泡列：让「已隐藏」标签右对齐于气泡上方
+  userColumn: {
+    alignItems: 'flex-end',
+    maxWidth: '75%',
+    minWidth: 0,
+  },
+  messageAvatarHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 6,
+    maxWidth: '100%',
+  },
+  messageAvatarHeaderUser: {
+    alignSelf: 'flex-end',
+    justifyContent: 'flex-end',
+  },
+  messageAvatarHeaderAssistant: {
+    alignSelf: 'flex-start',
+    justifyContent: 'flex-start',
+  },
+  messageAvatarImage: {
+    width: MESSAGE_AVATAR_SIZE,
+    height: MESSAGE_AVATAR_SIZE,
+    backgroundColor: colors.surface,
+  },
+  messageAvatarFallback: {
+    width: MESSAGE_AVATAR_SIZE,
+    height: MESSAGE_AVATAR_SIZE,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  messageAvatarFallbackText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.textSecondary,
+  },
+  messageAvatarName: {
+    flexShrink: 1,
+    maxWidth: 160,
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.textSecondary,
+  },
+  messageAvatarMeta: {
+    flexShrink: 0,
+    fontSize: 11,
+    lineHeight: 15,
+    color: colors.textTertiary,
+    fontFamily: fonts.mono,
+  },
+  messageSideAvatarSlot: {
+    width: MESSAGE_AVATAR_SIZE,
+    flexShrink: 0,
+    alignItems: 'center',
+  },
+  userSideAvatarSlot: {
+    marginTop: 2,
+    marginLeft: 8,
+  },
+  assistantSideAvatarSlot: {
+    marginTop: 2,
+    marginRight: 8,
+  },
+  userSideMessageRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'flex-end',
+    maxWidth: '100%',
+    alignSelf: 'flex-end',
+  },
+  assistantSideMessageRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    maxWidth: '100%',
+    alignSelf: 'flex-start',
+  },
+  // 已隐藏楼层：整体降低透明度作区分
+  hiddenRow: {
+    opacity: 0.4,
+  },
+  hiddenBubble: {
+    opacity: 0.4,
+  },
+  hiddenLabelRight: {
+    fontSize: 10,
+    color: colors.textTertiary,
+    marginBottom: 3,
+    textAlign: 'right',
+  },
+  hiddenLabelLeft: {
+    fontSize: 10,
+    color: colors.textTertiary,
+    marginBottom: 3,
+    textAlign: 'left',
+  },
+  floorLabelRight: {
+    fontSize: 11,
+    color: colors.primary,
+    fontFamily: fonts.mono,
+    marginBottom: 3,
+    textAlign: 'right',
+  },
+  floorLabelLeft: {
+    fontSize: 11,
+    color: colors.primary,
+    fontFamily: fonts.mono,
+    marginBottom: 3,
+    textAlign: 'left',
+  },
+  // 长按菜单：全屏透明关闭层 + 锚定气泡上方的菜单
+  menuDismissOverlay: {
+    flex: 1,
+  },
+  bubbleMenu: {
+    position: 'absolute',
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderRadius: 12,
+    paddingHorizontal: 4,
+    shadowColor: '#000',
+    shadowOpacity: 0.18,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 6,
+  },
+  assistantActionMenu: {
+    width: 292,
+  },
+  bubbleMenuItem: {
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+  },
+  assistantActionMenuItem: {
+    flex: 1,
+    alignItems: 'center',
+    paddingHorizontal: 6,
+  },
+  pictureActionSheet: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    bottom: 24,
+    backgroundColor: colors.surface,
+    borderRadius: 16,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    shadowColor: '#000',
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 8,
+  },
+  pictureActionTitle: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: colors.textSecondary,
+    marginBottom: 8,
+    paddingHorizontal: 4,
+  },
+  pictureActionItem: {
+    minHeight: 46,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 10,
+  },
+  pictureActionText: {
+    fontSize: 15,
+    fontWeight: '500',
+    color: colors.text,
+  },
+  pictureActionTextDisabled: {
+    color: colors.textTertiary,
+  },
+  pictureActionTextDanger: {
+    color: colors.danger,
+  },
+  pictureActionCancel: {
+    minHeight: 46,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 10,
+    backgroundColor: colors.inputBackground,
+    marginTop: 6,
+  },
+  pictureActionCancelText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.text,
+  },
+  imagePreviewOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.86)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 18,
+  },
+  imagePreviewFrame: {
+    width: '100%',
+    height: '90%',
+    maxWidth: 920,
+    maxHeight: '92%',
+    gap: 12,
+    alignItems: 'center',
+  },
+  imagePreview: {
+    width: '100%',
+    flex: 1,
+    minHeight: 220,
+    borderRadius: 14,
+    backgroundColor: '#0B0B0B',
+  },
+  imagePreviewTitle: {
+    alignSelf: 'stretch',
+    color: '#F5F5F5',
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: 'center',
+  },
+  imagePreviewClose: {
+    minHeight: 42,
+    paddingHorizontal: 18,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  imagePreviewCloseText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  bubbleMenuItemDisabled: {
+    opacity: 0.45,
+  },
+  bubbleMenuText: {
+    fontSize: 15,
+    color: colors.text,
+    fontWeight: '500',
+  },
+  bubbleMenuTextDisabled: {
+    color: colors.textTertiary,
+  },
+  bubbleMenuTextDanger: {
+    color: colors.danger,
+  },
+  bubbleMenuDivider: {
+    width: StyleSheet.hairlineWidth,
+    height: 20,
+    backgroundColor: colors.inputBorder,
+  },
+  userBubble: {
+    alignSelf: 'flex-end',
+    minWidth: 0,
+    backgroundColor: colors.userBubble,
+    borderRadius: 20,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+  },
+  userBubbleWithSticker: {
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+  },
+  bubbleBlurLayer: {
+    overflow: 'hidden',
+  },
+  bubbleTail: {
+    display: 'none',
+    position: 'absolute',
+    width: 0,
+    height: 0,
+  },
+  userBubbleTail: {
+    right: -6,
+    top: 9,
+    borderTopWidth: 5,
+    borderBottomWidth: 5,
+    borderLeftWidth: 7,
+    borderTopColor: 'transparent',
+    borderBottomColor: 'transparent',
+    borderLeftColor: colors.userBubble,
+  },
+  assistantBubbleTail: {
+    left: -6,
+    top: 9,
+    borderTopWidth: 5,
+    borderBottomWidth: 5,
+    borderRightWidth: 7,
+    borderTopColor: 'transparent',
+    borderBottomColor: 'transparent',
+    borderRightColor: colors.userBubble,
+  },
+  bubbleTailSvg: {
+    display: 'none',
+    position: 'absolute',
+    width: 18,
+    height: 20,
+  },
+  userBubbleTailSvg: {
+    right: -10,
+    bottom: -2,
+    color: colors.userBubble,
+  },
+  assistantBubbleTailSvg: {
+    left: -10,
+    bottom: -2,
+    color: colors.userBubble,
+  },
+  sharedLinkCard: {
+    width: Math.min(300, LINK_CARD_MAX_WIDTH),
+    minHeight: 74,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  sharedLinkIconWrap: {
+    width: 42,
+    height: 42,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  sharedLinkIcon: {
+    width: 22,
+    height: 22,
+    tintColor: colors.primary,
+  },
+  sharedLinkTextBlock: {
+    flex: 1,
+    minWidth: 0,
+  },
+  sharedLinkTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.text,
+    marginBottom: 4,
+  },
+  sharedLinkSubtitle: {
+    fontSize: 12,
+    lineHeight: 17,
+    color: colors.textSecondary,
+  },
+  dailyPaperCard: {
+    width: Math.min(310, LINK_CARD_MAX_WIDTH),
+    gap: 6,
+  },
+  dailyPaperEyebrow: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.primary,
+  },
+  dailyPaperTitle: {
+    fontSize: 16,
+    lineHeight: 21,
+    fontWeight: '800',
+    color: colors.text,
+  },
+  dailyPaperSummary: {
+    fontSize: 12,
+    lineHeight: 17,
+    color: colors.textSecondary,
+  },
+  dailyPaperMeta: {
+    marginTop: 2,
+    fontSize: 11,
+    color: colors.textTertiary,
+  },
+  dailyPaperModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.48)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+  },
+  dailyPaperModal: {
+    width: '100%',
+    maxWidth: 620,
+    maxHeight: '86%',
+    borderRadius: 14,
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 16,
+  },
+  dailyPaperModalTitle: {
+    fontSize: 18,
+    lineHeight: 24,
+    fontWeight: '900',
+    color: colors.text,
+    textAlign: 'center',
+  },
+  dailyPaperModalDate: {
+    marginTop: 4,
+    marginBottom: 10,
+    fontSize: 12,
+    color: colors.textTertiary,
+    textAlign: 'center',
+  },
+  dailyPaperModalBody: {
+    maxHeight: 460,
+  },
+  dailyPaperModalText: {
+    fontSize: 15,
+    lineHeight: 23,
+    color: colors.text,
+  },
+  dailyPaperModalSources: {
+    marginTop: 18,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    gap: 8,
+  },
+  dailyPaperModalSourceTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: colors.text,
+  },
+  dailyPaperModalSourceText: {
+    fontSize: 12,
+    lineHeight: 17,
+    color: colors.textSecondary,
+  },
+  userStickerOnlyBubble: {
+    backgroundColor: 'transparent',
+    borderRadius: 0,
+    paddingVertical: 0,
+    paddingHorizontal: 0,
+    overflow: 'visible',
+  },
+  userStickerOnlyMessage: {
+    alignSelf: 'flex-end',
+    minWidth: 0,
+    backgroundColor: 'transparent',
+    borderRadius: 0,
+    paddingVertical: 0,
+    paddingHorizontal: 0,
+    overflow: 'visible',
+  },
+  locationCard: {
+    width: Math.min(300, IMAGE_MAX_WIDTH + 48),
+    borderRadius: 14,
+    overflow: 'hidden',
+    backgroundColor: colors.inputBackground,
+    borderWidth: 1,
+    borderColor: colors.inputBorder,
+    marginBottom: 6,
+  },
+  locationMapImage: {
+    width: '100%',
+    height: 128,
+    backgroundColor: colors.surface,
+  },
+  locationMapFallback: {
+    height: 128,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surface,
+  },
+  locationMapFallbackText: {
+    color: colors.textTertiary,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  locationCardBody: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 4,
+  },
+  locationTitle: {
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  locationAddress: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  userImage: {
+    width: IMAGE_MAX_WIDTH,
+    height: IMAGE_MAX_WIDTH,
+    borderRadius: 16,
+    marginBottom: 6,
+  },
+  referenceImagesBlock: {
+    width: IMAGE_MAX_WIDTH,
+    marginBottom: 6,
+    alignItems: 'flex-end',
+  },
+  referenceImagesLabel: {
+    marginBottom: 4,
+    fontSize: 11,
+    color: colors.textTertiary,
+    fontWeight: '600',
+  },
+  referenceImagesList: {
+    width: IMAGE_MAX_WIDTH,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
+    gap: 6,
+  },
+  referenceImageThumb: {
+    width: 54,
+    height: 54,
+    borderRadius: 10,
+    backgroundColor: colors.surface,
+  },
+  userText: {
+    fontSize: 16,
+    color: colors.text,
+    lineHeight: 22,
+    fontFamily: fonts.serif,
+    fontWeight: 'normal',
+  },
+  voiceBubble: {
+    minWidth: 164,
+    maxWidth: 240,
+    minHeight: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  voiceIconCircle: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.38)',
+  },
+  voiceIconText: {
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  voiceWave: {
+    flex: 1,
+    minWidth: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  voiceWaveBar: {
+    width: 3,
+    height: 18,
+    borderRadius: 2,
+    backgroundColor: colors.textSecondary,
+    opacity: 0.72,
+  },
+  voiceWaveBarShort: {
+    height: 10,
+  },
+  voiceWaveBarTall: {
+    height: 24,
+  },
+  voiceDuration: {
+    flexShrink: 0,
+    fontSize: 13,
+    lineHeight: 17,
+    fontFamily: fonts.mono,
+  },
+  voiceTranscript: {
+    alignSelf: 'flex-end',
+    maxWidth: '100%',
+    marginTop: 5,
+    marginRight: 4,
+    fontSize: 13,
+    lineHeight: 19,
+    color: colors.textSecondary,
+    textAlign: 'right',
+  },
+  voiceTranscriptFailed: {
+    color: colors.danger,
+  },
+  systemRow: {
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    marginVertical: 8,
+  },
+  systemText: {
+    fontSize: 12,
+    lineHeight: 17,
+    color: colors.textTertiary,
+    textAlign: 'center',
+  },
+  assistantRow: {
+    paddingHorizontal: 16,
+    marginVertical: 8,
+  },
+  assistantContent: {
+    width: '100%',
+    maxWidth: '100%',
+  },
+  assistantSideContent: {
+    flex: 1,
+    minWidth: 0,
+  },
+  assistantBubble: {
+    alignSelf: 'flex-start',
+    maxWidth: '75%',
+    flexShrink: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    overflow: 'hidden',
+  },
+  assistantBubbleStack: {
+    alignItems: 'flex-start',
+    gap: 16,
+    maxWidth: '100%',
+  },
+  remoteActivityCard: {
+    alignSelf: 'flex-start',
+    width: '88%',
+    maxWidth: 360,
+    flexShrink: 1,
+    borderRadius: 8,
+    padding: 14,
+    gap: 8,
+    backgroundColor: colors.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    shadowColor: '#000',
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
+  },
+  remoteActivityHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  remoteActivityStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    minWidth: 0,
+  },
+  remoteActivityDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: colors.primary,
+  },
+  remoteActivityEyebrow: {
+    fontSize: 11,
+    lineHeight: 15,
+    color: colors.conversationMuted,
+    fontWeight: '700',
+  },
+  remoteActivityTime: {
+    flexShrink: 0,
+    fontSize: 11,
+    lineHeight: 15,
+    color: colors.conversationMuted,
+    fontFamily: fonts.mono,
+  },
+  remoteActivityTitle: {
+    fontSize: 16,
+    lineHeight: 22,
+    color: colors.text,
+    fontWeight: '700',
+  },
+  remoteActivitySummary: {
+    fontSize: 14,
+    lineHeight: 21,
+    color: colors.conversationMuted,
+  },
+  remoteActivityTools: {
+    gap: 6,
+    paddingTop: 2,
+  },
+  remoteActivityToolItem: {
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    backgroundColor: colors.inputBackground,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.inputBorder,
+  },
+  remoteActivityToolName: {
+    fontSize: 12,
+    lineHeight: 16,
+    color: colors.text,
+    fontWeight: '700',
+  },
+  remoteActivityToolResult: {
+    marginTop: 3,
+    fontSize: 12,
+    lineHeight: 17,
+    color: colors.conversationMuted,
+  },
+  remoteActivityMoreTools: {
+    fontSize: 12,
+    lineHeight: 16,
+    color: colors.conversationMuted,
+  },
+  assistantFlow: {
+    width: '100%',
+    maxWidth: '100%',
+    gap: 8,
+  },
+  // 工具调用记录列表（兼容旧布局间距）
+  toolList: {
+    marginBottom: 8,
+    gap: 6,
+  },
+  toolInlineItem: {
+    alignSelf: 'stretch',
+    flexShrink: 1,
+    minWidth: 0,
+    maxWidth: '100%',
+  },
+  // 单行工具调用：箭头紧跟文字，长文字在可用宽度内收缩。
+  toolRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  toolIconLeft: {
+    width: 13,
+    height: 13,
+    marginRight: 8,
+    tintColor: colors.conversationMuted,
+    opacity: 1,
+  },
+  toolText: {
+    flexShrink: 1,
+    minWidth: 0,
+    fontSize: 13,
+    color: colors.conversationMuted,
+    fontFamily: TIKTOK_SANS_REGULAR,
+  },
+  toolDetailBox: {
+    height: 240,
+    marginLeft: 21,
+    marginTop: 6,
+    marginBottom: 2,
+    borderRadius: 10,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    overflow: 'hidden',
+  },
+  toolDetailScroll: {
+    flex: 1,
+  },
+  toolDetailScrollContent: {
+    padding: 10,
+    paddingBottom: 2,
+  },
+  toolDetailLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: colors.conversationMuted,
+    marginBottom: 4,
+  },
+  toolDetailText: {
+    fontSize: 12,
+    lineHeight: 17,
+    color: colors.conversationMuted,
+    marginBottom: 8,
+    fontFamily: fonts.mono,
+  },
+  toolIconRight: {
+    width: 11,
+    height: 11,
+    marginLeft: 6,
+    tintColor: colors.conversationMuted,
+    opacity: 1,
+  },
+  // 思维链记录沿用工具调用行与展开内容样式。
+  thinkingWrap: {
+    flexShrink: 1,
+    minWidth: 0,
+    maxWidth: '100%',
+    marginBottom: 10,
+  },
+  summaryOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  summaryBackdrop: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    backgroundColor: 'transparent',
+  },
+  summaryOverlayVisible: {
+    backgroundColor: 'rgba(0, 0, 0, 0.16)',
+  },
+  summarySheet: {
+    height: Dimensions.get('window').height * 0.5,
+    borderTopLeftRadius: 34,
+    borderTopRightRadius: 34,
+    backgroundColor: colors.background,
+    overflow: 'hidden',
+  },
+  summaryHandle: {
+    alignSelf: 'center',
+    width: 52,
+    height: 5,
+    marginTop: 11,
+    marginBottom: 9,
+    borderRadius: 3,
+    backgroundColor: colors.border,
+  },
+  summaryHeader: {
+    height: 58,
+    paddingHorizontal: 24,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  summaryHeaderButton: {
+    width: 44,
+    height: 44,
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+  },
+  summaryHeaderButtonText: {
+    color: colors.text,
+    fontSize: 38,
+    lineHeight: 40,
+    fontWeight: '300',
+  },
+  summaryTitle: {
+    flex: 1,
+    marginHorizontal: 8,
+    color: colors.text,
+    fontFamily: fonts.bold,
+    fontSize: 22,
+    lineHeight: 29,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  summaryBody: {
+    flex: 1,
+  },
+  summaryList: {
+    paddingHorizontal: 30,
+    paddingTop: 12,
+    paddingBottom: 42,
+  },
+  summaryListItem: {
+    minHeight: 68,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 12,
+  },
+  summaryBullet: {
+    width: 10,
+    height: 10,
+    marginRight: 22,
+    borderRadius: 5,
+    backgroundColor: colors.border,
+  },
+  summaryToolBullet: {
+    backgroundColor: colors.primary,
+    opacity: 0.7,
+  },
+  summaryItemText: {
+    flex: 1,
+    color: colors.text,
+    fontSize: 18,
+    lineHeight: 26,
+  },
+  summaryChevron: {
+    marginLeft: 12,
+    color: colors.conversationMuted,
+    fontSize: 27,
+    lineHeight: 30,
+    fontWeight: '300',
+  },
+  summaryDetailContent: {
+    paddingHorizontal: 32,
+    paddingTop: 16,
+    paddingBottom: 48,
+  },
+  summaryDetailLabel: {
+    marginBottom: 8,
+    color: colors.conversationMuted,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '700',
+  },
+  summaryDetailText: {
+    marginBottom: 24,
+    color: colors.text,
+    fontSize: 14,
+    lineHeight: 21,
+    fontFamily: fonts.mono,
+  },
+  actions: {
+    flexDirection: 'row',
+    marginTop: -4,
+    gap: 2,
+    position: 'relative',
+    zIndex: 30,
+  },
+  actionsAfterSticker: {
+    marginTop: 6,
+  },
+  actionButton: {
+    width: 28,
+    height: 28,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 6,
+  },
+  actionImage: {
+    width: 16,
+    height: 16,
+  },
+  reactionActionEmoji: {
+    fontSize: 18,
+    lineHeight: 22,
+  },
+  reactionPicker: {
+    position: 'absolute',
+    width: 184,
+    height: 34,
+    borderRadius: 10,
+    backgroundColor: colors.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    elevation: 8,
+    zIndex: 40,
+    shadowColor: '#000',
+    shadowOpacity: 0.14,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+  },
+  reactionPickerOverlay: {
+    flex: 1,
+  },
+  reactionPickerScroll: {
+    width: '100%',
+    height: '100%',
+  },
+  reactionPickerContent: {
+    flexDirection: 'row',
+    flexWrap: 'nowrap',
+    alignItems: 'center',
+    paddingHorizontal: 3,
+  },
+  reactionPickerButton: {
+    width: 30,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  reactionPickerEmoji: {
+    fontSize: 18,
+    lineHeight: 22,
+  },
+  userReactionBadge: {
+    position: 'absolute',
+    zIndex: 20,
+    right: -9,
+    top: -9,
+    minWidth: 27,
+    height: 27,
+    paddingHorizontal: 4,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    elevation: 4,
+  },
+  reactionBadgeEmoji: {
+    fontSize: 17,
+    lineHeight: 21,
+  },
+  logoRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  logoImage: {
+    width: 28,
+    height: 28,
+  },
+  disclaimerText: {
+    fontSize: 11,
+    color: colors.conversationMuted,
+    textAlign: 'right',
+    lineHeight: 16,
+    fontFamily: TIKTOK_SANS_REGULAR,
+  },
+  overlay: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.3)',
+    justifyContent: 'center', alignItems: 'center',
+  },
+  modal: {
+    backgroundColor: colors.background, borderRadius: 16, padding: 24, width: '85%',
+  },
+  modalTitle: {
+    fontSize: 17, fontWeight: '600', color: colors.text, marginBottom: 16,
+  },
+  modalInput: {
+    backgroundColor: colors.inputBackground, borderWidth: 1, borderColor: colors.inputBorder,
+    borderRadius: 10, padding: 12, fontSize: 15, color: colors.text,
+    minHeight: 100, maxHeight: 240, textAlignVertical: 'top', marginBottom: 20,
+  },
+  modalButtons: {
+    flexDirection: 'row', justifyContent: 'flex-end', gap: 12,
+  },
+  modalCancel: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8 },
+  modalCancelText: { fontSize: 15, color: colors.textSecondary },
+  modalConfirm: {
+    paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8, backgroundColor: colors.primary,
+  },
+  modalConfirmText: { fontSize: 15, color: '#FFFFFF', fontWeight: '500' },
+});
+
+function createMarkdownTableStyles(
+  colors: ThemeColors,
+  textColor: string,
+  options: {
+    cellMinWidth?: number;
+    cellPaddingHorizontal?: number;
+    cellPaddingVertical?: number;
+    cellTextStyle?: TextStyle;
+    marginVertical?: number;
+  } = {}
+) {
+  const cellMinWidth = options.cellMinWidth ?? 128;
+  const cellPaddingHorizontal = options.cellPaddingHorizontal ?? 10;
+  const cellPaddingVertical = options.cellPaddingVertical ?? 8;
+  const marginVertical = options.marginVertical ?? 10;
+  const cellTextStyle = options.cellTextStyle ?? {};
+
+  return {
+    markdownTableViewport: {
+      alignSelf: 'stretch' as const,
+      width: '100%' as const,
+      maxWidth: '100%' as const,
+      minWidth: 0,
+      overflow: 'hidden' as const,
+      marginVertical,
+      paddingVertical: 4,
+    },
+    markdownTableScroll: {
+      alignSelf: 'stretch' as const,
+      width: '100%' as const,
+      maxWidth: '100%' as const,
+      minWidth: 0,
+      minHeight: 44,
+      flexShrink: 1,
+    },
+    markdownTableScrollContent: {
+      flexGrow: 0,
+      alignItems: 'flex-start' as const,
+      minWidth: '100%' as const,
+      paddingVertical: 2,
+      paddingRight: 2,
+    },
+    markdownTable: {
+      alignSelf: 'flex-start' as const,
+      flexShrink: 0,
+    },
+    table: {
+      alignSelf: 'flex-start' as const,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 8,
+      overflow: 'hidden' as const,
+      flexShrink: 0,
+    },
+    thead: { flexShrink: 0 },
+    tbody: { flexShrink: 0 },
+    tr: {
+      flexDirection: 'row' as const,
+      alignSelf: 'flex-start' as const,
+      flexShrink: 0,
+      borderBottomWidth: 1,
+      borderColor: colors.border,
+    },
+    th: {
+      minWidth: cellMinWidth,
+      flexShrink: 0,
+      paddingVertical: cellPaddingVertical,
+      paddingHorizontal: cellPaddingHorizontal,
+      backgroundColor: colors.surface,
+      color: textColor,
+      fontWeight: 'normal' as const,
+      ...cellTextStyle,
+    },
+    td: {
+      minWidth: cellMinWidth,
+      flexShrink: 0,
+      paddingVertical: cellPaddingVertical,
+      paddingHorizontal: cellPaddingHorizontal,
+      color: textColor,
+      fontWeight: 'normal' as const,
+      ...cellTextStyle,
+    },
+  };
+}
+
+function createMarkdownListStyles(
+  textColor: string,
+  fontSize: number,
+  lineHeight: number,
+  compact = false,
+  textStyle?: TextStyle
+) {
+  const resolvedTextStyle = StyleSheet.flatten(textStyle) || {};
+  const resolvedFontSize = resolvedTextStyle.fontSize ?? fontSize;
+  const resolvedLineHeight = resolvedTextStyle.lineHeight ?? lineHeight;
+  const listTypography = {
+    ...resolvedTextStyle,
+    color: resolvedTextStyle.color ?? textColor,
+    fontSize: resolvedFontSize,
+    lineHeight: resolvedLineHeight,
+  };
+  const verticalMargin = compact ? 1 : 3;
+  const listContainerStyle = {
+    width: '100%' as const,
+    maxWidth: '100%' as const,
+    marginVertical: compact ? 0 : 2,
+    paddingLeft: 0,
+  };
+  const listItemStyle = {
+    flexDirection: 'row' as const,
+    alignItems: 'flex-start' as const,
+    justifyContent: 'flex-start' as const,
+    width: '100%' as const,
+    maxWidth: '100%' as const,
+    minWidth: 0,
+    flexShrink: 1,
+    marginVertical: verticalMargin,
+    ...listTypography,
+  };
+  const bulletIconStyle = {
+    width: 18,
+    minWidth: 18,
+    flexShrink: 0,
+    marginLeft: 0,
+    marginRight: 6,
+    ...listTypography,
+    textAlign: 'center' as const,
+  };
+  const orderedIconStyle = {
+    minWidth: 24,
+    flexShrink: 0,
+    marginLeft: 0,
+    marginRight: 6,
+    ...listTypography,
+    textAlign: 'right' as const,
+  };
+  const contentStyle = {
+    flex: 1,
+    minWidth: 0,
+    maxWidth: '100%' as const,
+    flexShrink: 1,
+  };
+
+  return {
+    bullet_list: listContainerStyle,
+    ordered_list: listContainerStyle,
+    list_item: listItemStyle,
+    bullet_list_icon: bulletIconStyle,
+    ordered_list_icon: orderedIconStyle,
+    bullet_list_content: contentStyle,
+    ordered_list_content: contentStyle,
+    _VIEW_SAFE_bullet_list: listContainerStyle,
+    _VIEW_SAFE_ordered_list: listContainerStyle,
+    _VIEW_SAFE_list_item: listItemStyle,
+    _VIEW_SAFE_bullet_list_content: contentStyle,
+    _VIEW_SAFE_ordered_list_content: contentStyle,
+  };
+}
+
+const createUserMarkdownStyles = (
+  colors: ThemeColors,
+  fontSize = 16,
+  textColor = colors.text,
+  customTextStyle?: TextStyle
+) => {
+  const customTextStyleWithoutFontWeight = withoutFontWeight(customTextStyle);
+  const resolvedTextColor = typeof customTextStyleWithoutFontWeight?.color === 'string'
+    ? customTextStyleWithoutFontWeight.color
+    : textColor;
+
+  return StyleSheet.create({
+  body: {
+    width: '100%',
+    maxWidth: '100%',
+    minWidth: 0,
+    fontSize,
+    color: resolvedTextColor,
+    lineHeight: Math.round(fontSize * 1.38),
+    fontFamily: fonts.serif,
+    fontWeight: 'normal',
+    ...customTextStyleWithoutFontWeight,
+  },
+  paragraph: {
+    marginTop: 0,
+    marginBottom: 0,
+  },
+  hr: createMarkdownDividerStyle(resolvedTextColor, true),
+  strong: {
+    fontFamily: fonts.serifStrong,
+    fontWeight: fontWeights.serifStrong,
+    color: resolvedTextColor,
+  },
+  markdownStrongText: {
+    fontStyle: 'normal',
+  },
+  em: {
+    color: resolvedTextColor,
+  },
+  code_inline: {
+    backgroundColor: withAlpha(textColor, 0.1),
+    color: textColor,
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+    borderRadius: 4,
+    fontSize: Math.max(12, fontSize - 1),
+    fontFamily: fonts.mono,
+  },
+  ...createMarkdownListStyles(
+    resolvedTextColor,
+    fontSize,
+    Math.round(fontSize * 1.38),
+    true,
+    {
+      fontFamily: fonts.serif,
+      ...customTextStyleWithoutFontWeight,
+    }
+  ),
+  ...createMarkdownTableStyles(colors, resolvedTextColor, {
+    cellMinWidth: 128,
+    cellTextStyle: customTextStyleWithoutFontWeight,
+    marginVertical: 8,
+  }),
+  link: {
+    color: colors.primary,
+  },
+  });
+};
+
+const createMarkdownStyles = (
+  colors: ThemeColors,
+  fontSize = 16,
+  textColor = colors.text,
+  strokeColor = colors.background,
+  strokeWidth = 0,
+  customTextStyle?: TextStyle,
+  compactBubble = false
+) => {
+  const customTextStyleWithoutFontWeight = withoutFontWeight(customTextStyle);
+  const resolvedTextColor = typeof customTextStyleWithoutFontWeight?.color === 'string'
+    ? customTextStyleWithoutFontWeight.color
+    : textColor;
+  const strokeStyle = strokeWidth > 0
+    ? {
+        textShadowColor: strokeColor,
+        textShadowRadius: strokeWidth,
+        textShadowOffset: { width: 0, height: 0 },
+      }
+    : {};
+  const lineHeight = Math.round(fontSize * (compactBubble ? 1.38 : 1.5));
+  const listStyles = createMarkdownListStyles(
+    resolvedTextColor,
+    fontSize,
+    lineHeight,
+    compactBubble,
+    {
+      fontFamily: fonts.serif,
+      ...strokeStyle,
+      ...customTextStyleWithoutFontWeight,
+    }
+  );
+
+  return StyleSheet.create({
+  body: {
+    width: '100%',
+    fontSize,
+    color: resolvedTextColor,
+    lineHeight,
+    fontFamily: fonts.serif,
+    fontWeight: 'normal',
+    ...strokeStyle,
+    ...customTextStyleWithoutFontWeight,
+  },
+  paragraph: compactBubble ? { marginTop: 0, marginBottom: 0 } : {},
+  hr: createMarkdownDividerStyle(resolvedTextColor, compactBubble),
+  code_inline: {
+    backgroundColor: colors.surface, color: colors.primary,
+    paddingHorizontal: 5, paddingVertical: 2, borderRadius: 4, fontSize: 14, fontFamily: fonts.mono,
+  },
+  fence: { backgroundColor: colors.codeBlock, borderRadius: 10, padding: 14, marginVertical: 10 },
+  code_block: { color: colors.codeText, fontSize: 13, fontFamily: fonts.mono },
+  heading1: { fontSize: 22, fontFamily: fonts.serifBold, fontWeight: fontWeights.serifBold, marginVertical: 8, color: resolvedTextColor, ...strokeStyle },
+  heading2: { fontSize: 18, fontFamily: fonts.serifBold, fontWeight: fontWeights.serifBold, marginVertical: 6, color: resolvedTextColor, ...strokeStyle },
+  heading3: { fontSize: 16, fontFamily: fonts.serifBold, fontWeight: fontWeights.serifBold, marginVertical: 4, color: resolvedTextColor, ...strokeStyle },
+  strong: { fontFamily: fonts.serifStrong, fontWeight: fontWeights.serifStrong, color: resolvedTextColor, ...strokeStyle },
+  markdownStrongText: { fontStyle: 'normal' },
+  blockquote: {
+    borderLeftWidth: 3, borderLeftColor: colors.primary, paddingLeft: 12, marginVertical: 8, opacity: 0.8,
+  },
+  ...listStyles,
+  list_item: {
+    ...listStyles.list_item,
+    ...strokeStyle,
+  },
+  bullet_list_icon: {
+    ...listStyles.bullet_list_icon,
+    ...strokeStyle,
+  },
+  ordered_list_icon: {
+    ...listStyles.ordered_list_icon,
+    ...strokeStyle,
+  },
+  link: { color: colors.primary },
+  ...createMarkdownTableStyles(colors, resolvedTextColor, { cellTextStyle: strokeStyle }),
+  });
+};
+
+let styles = createStyles(colors);
+let markdownStyles = createMarkdownStyles(colors);

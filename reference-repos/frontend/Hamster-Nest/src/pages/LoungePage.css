@@ -1,0 +1,663 @@
+.lounge-page {
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 14px 14px 20px;
+  min-height: 100dvh;
+  display: grid;
+  gap: 12px;
+  align-content: start;
+  color: #1f2937;
+  position: relative;
+  isolation: isolate;
+}
+
+.lounge-page::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at 10% 0%, rgba(255, 214, 231, 0.34), transparent 42%),
+    radial-gradient(circle at 90% 0%, rgba(255, 239, 246, 0.82), transparent 52%),
+    linear-gradient(180deg, rgba(255, 252, 254, 0.96) 0%, rgba(253, 245, 249, 0.96) 100%);
+}
+
+/* ── Header ───────────────────────────────────── */
+
+.lounge-header {
+  position: relative;
+  min-height: 72px;
+  padding: 12px 92px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 214, 231, 0.85);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 8px 18px rgba(255, 214, 231, 0.24);
+}
+
+.lounge-title-wrap {
+  display: grid;
+  gap: 2px;
+  text-align: center;
+  min-width: 0;
+}
+
+.lounge-title-wrap .ui-title {
+  margin: 0;
+  color: #5c5c5c;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lounge-kicker {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #b27f98;
+}
+
+.lounge-back-btn,
+.lounge-create-btn,
+.lounge-scene-btn {
+  position: absolute;
+  top: 14px;
+  border-radius: 999px;
+  border: 1px solid #ffd6e7;
+  background: #fff;
+  color: #7d5d70;
+  padding: 7px 12px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.lounge-back-btn { left: 12px; }
+.lounge-create-btn,
+.lounge-scene-btn { right: 12px; }
+
+.lounge-create-btn {
+  background: linear-gradient(180deg, #ffeef6 0%, #ffe1ef 100%);
+  font-weight: 600;
+}
+
+.lounge-error {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid #fecdd3;
+  background: #fff1f2;
+  color: #be123c;
+  font-size: 13px;
+}
+
+.lounge-empty {
+  margin: 0;
+  padding: 18px 12px;
+  text-align: center;
+  color: #b27f98;
+  font-size: 14px;
+}
+
+/* ── Sofa list ────────────────────────────────── */
+
+.lounge-create-form {
+  display: flex;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid rgba(255, 214, 231, 0.88);
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 8px 18px rgba(255, 214, 231, 0.18);
+}
+
+.lounge-create-form input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid #ffd6e7;
+  border-radius: 12px;
+  padding: 9px 12px;
+  font-size: 14px;
+  background: #fffafd;
+}
+
+.lounge-create-form button {
+  border-radius: 12px;
+  border: 1px solid #ffd6e7;
+  background: linear-gradient(180deg, #ffeef6 0%, #ffe1ef 100%);
+  color: #7d5d70;
+  padding: 9px 16px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.lounge-create-form button:disabled {
+  opacity: 0.5;
+}
+
+.lounge-sofa-list {
+  display: grid;
+  gap: 10px;
+}
+
+.lounge-sofa-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid rgba(255, 214, 231, 0.88);
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 8px 18px rgba(255, 214, 231, 0.16);
+}
+
+.lounge-sofa-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: none;
+  background: transparent;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.lounge-sofa-emoji {
+  width: 42px;
+  height: 42px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  font-size: 22px;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #ffeef6 0%, #ffe1ef 100%);
+}
+
+.lounge-sofa-info {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.lounge-sofa-info strong {
+  font-size: 15px;
+  color: #68485e;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lounge-sofa-meta {
+  font-size: 12px;
+  color: #b27f98;
+}
+
+.lounge-sofa-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.lounge-sofa-actions button {
+  border-radius: 999px;
+  border: 1px solid #ffd6e7;
+  background: #fff;
+  color: #7d5d70;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+.lounge-sofa-actions .lounge-danger {
+  border-color: #fecdd3;
+  color: #be123c;
+}
+
+.lounge-rename-form {
+  flex: 1;
+  display: flex;
+  gap: 6px;
+}
+
+.lounge-rename-form input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid #ffd6e7;
+  border-radius: 10px;
+  padding: 7px 10px;
+  font-size: 14px;
+}
+
+.lounge-rename-form button {
+  border-radius: 10px;
+  border: 1px solid #ffd6e7;
+  background: #fff;
+  color: #7d5d70;
+  padding: 7px 10px;
+  font-size: 13px;
+}
+
+/* ── Chat room ────────────────────────────────── */
+
+/* 错误条等子元素是条件渲染的，固定 grid 行模板会让输入区掉进 1fr 行被拉伸；
+   改用 flex 列布局：消息区独占剩余空间，输入区贴底保持内容高度。 */
+.lounge-room {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  min-height: 0;
+}
+
+.lounge-message-list {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+  min-height: 0;
+  padding: 4px 2px 8px;
+}
+
+.lounge-message {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  max-width: 86%;
+}
+
+.lounge-message--in {
+  align-self: flex-start;
+}
+
+.lounge-message--out {
+  align-self: flex-end;
+  flex-direction: row-reverse;
+}
+
+.lounge-avatar {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  font-size: 18px;
+  border-radius: 12px;
+  background: #f6f8fa;
+  border: 1px solid #e8ecf0;
+}
+
+.lounge-message-body {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.lounge-message--out .lounge-message-body {
+  justify-items: end;
+}
+
+.lounge-message-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: #8a6178;
+  padding-left: 2px;
+}
+
+.lounge-bubble {
+  padding: 9px 12px;
+  border-radius: 16px;
+  border-top-left-radius: 6px;
+  background: #fff;
+  border: 1px solid rgba(255, 214, 231, 0.9);
+  box-shadow: 0 4px 10px rgba(255, 214, 231, 0.18);
+  font-size: 14px;
+  line-height: 1.55;
+  color: #3f3340;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.lounge-message--out .lounge-bubble {
+  border-radius: 16px;
+  border-top-right-radius: 6px;
+  background: linear-gradient(180deg, #ffeef6 0%, #ffdcec 100%);
+  border-color: #ffcfe3;
+}
+
+.lounge-bubble--streaming {
+  opacity: 0.85;
+}
+
+.lounge-message-time {
+  font-size: 11px;
+  color: #c39bae;
+  padding: 0 2px;
+}
+
+/* ── 正在回复状态（E-4A）──────────────────────── */
+
+/* 一条原消息可能同时点名多个角色，纵向堆叠各自的状态。 */
+.lounge-reply-status-group {
+  align-self: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 86%;
+  margin-top: -4px;
+  padding-left: 2px;
+}
+
+.lounge-reply-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px 5px 6px;
+  border-radius: 14px;
+  border-top-left-radius: 6px;
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px dashed rgba(255, 214, 231, 0.9);
+  font-size: 12px;
+  color: #8a6178;
+  animation: lounge-status-in 0.2s ease;
+}
+
+.lounge-reply-status--failed {
+  border-style: solid;
+  border-color: rgba(230, 111, 81, 0.4);
+  background: rgba(230, 111, 81, 0.08);
+  color: #b9543b;
+}
+
+.lounge-reply-status--timeout {
+  border-color: rgba(195, 155, 174, 0.6);
+  color: #9a7c8c;
+}
+
+.lounge-reply-status-text {
+  line-height: 1.4;
+}
+
+.lounge-avatar--sm {
+  width: 24px;
+  height: 24px;
+  font-size: 13px;
+  border-radius: 9px;
+}
+
+/* 三点跳动 —— 轻量、不抢视线。 */
+.lounge-typing {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 3px;
+  padding-bottom: 1px;
+}
+
+.lounge-typing span {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.55;
+  animation: lounge-typing-bounce 1.2s ease-in-out infinite;
+}
+
+.lounge-typing span:nth-child(2) {
+  animation-delay: 0.18s;
+}
+
+.lounge-typing span:nth-child(3) {
+  animation-delay: 0.36s;
+}
+
+@keyframes lounge-typing-bounce {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.45;
+  }
+  30% {
+    transform: translateY(-4px);
+    opacity: 0.9;
+  }
+}
+
+@keyframes lounge-status-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lounge-typing span {
+    animation: none;
+    opacity: 0.7;
+  }
+  .lounge-reply-status {
+    animation: none;
+  }
+}
+
+/* ── Composer ─────────────────────────────────── */
+
+.lounge-composer {
+  position: relative;
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid rgba(255, 214, 231, 0.88);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 8px 18px rgba(255, 214, 231, 0.2);
+}
+
+/* 浮层的定位参照：包住点名菜单与输入行，菜单从输入行上沿向上弹出 */
+.lounge-input-anchor {
+  position: relative;
+}
+
+/* 点名抽屉：锚定在输入行正上方的成员下拉菜单 */
+.lounge-mention-menu {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 20;
+  min-width: 200px;
+  max-width: 100%;
+  box-sizing: border-box;
+  max-height: 260px;
+  overflow-y: auto;
+  display: grid;
+  gap: 2px;
+  padding: 6px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 214, 231, 0.9);
+  background: #fff;
+  box-shadow: 0 12px 28px rgba(63, 51, 64, 0.16);
+}
+
+.lounge-mention-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: #4b3a47;
+  padding: 8px 10px;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.lounge-mention-option:hover {
+  background: #fff0f7;
+}
+
+.lounge-mention-emoji {
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  font-size: 14px;
+  border-radius: 9px;
+  background: #f6f8fa;
+  border: 1px solid #e8ecf0;
+}
+
+.lounge-mention-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lounge-mention-dot {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: 999px;
+}
+
+.lounge-mention-toggle {
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+  border-radius: 12px;
+  border: 1px solid #ffd6e7;
+  background: #fff;
+  color: #b27f98;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.lounge-mention-toggle--open {
+  background: linear-gradient(180deg, #ffeef6 0%, #ffe1ef 100%);
+  color: #7d5d70;
+}
+
+.lounge-mention-toggle:disabled {
+  opacity: 0.4;
+}
+
+.lounge-input-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.lounge-input-row textarea {
+  flex: 1;
+  min-width: 0;
+  resize: none;
+  border: 1px solid #ffd6e7;
+  border-radius: 14px;
+  padding: 9px 12px;
+  font-size: 14px;
+  line-height: 1.5;
+  background: #fffafd;
+  font-family: inherit;
+}
+
+.lounge-send-btn {
+  border-radius: 14px;
+  border: 1px solid #ffd6e7;
+  background: linear-gradient(180deg, #ffeef6 0%, #ffe1ef 100%);
+  color: #7d5d70;
+  padding: 10px 18px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.lounge-send-btn:disabled {
+  opacity: 0.5;
+}
+
+/* ── Scene prompt dialog ──────────────────────── */
+
+.lounge-scene-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(63, 51, 64, 0.4);
+}
+
+.lounge-scene-dialog {
+  width: min(560px, 100%);
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 214, 231, 0.9);
+  background: #fffafd;
+  box-shadow: 0 16px 40px rgba(63, 51, 64, 0.22);
+}
+
+.lounge-scene-dialog h2 {
+  margin: 0;
+  font-size: 16px;
+  color: #68485e;
+}
+
+.lounge-scene-hint {
+  margin: 0;
+  font-size: 12px;
+  color: #b27f98;
+  line-height: 1.5;
+}
+
+.lounge-scene-dialog textarea {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  border: 1px solid #ffd6e7;
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.6;
+  background: #fff;
+  font-family: inherit;
+}
+
+.lounge-scene-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.lounge-scene-actions button {
+  border-radius: 12px;
+  border: 1px solid #ffd6e7;
+  background: #fff;
+  color: #7d5d70;
+  padding: 8px 14px;
+  font-size: 13px;
+}
+
+.lounge-scene-actions .lounge-scene-save {
+  background: linear-gradient(180deg, #ffeef6 0%, #ffe1ef 100%);
+  font-weight: 600;
+}
+
+@media (max-width: 480px) {
+  .lounge-header {
+    padding: 12px 76px;
+  }
+}

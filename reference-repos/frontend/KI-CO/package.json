@@ -1,0 +1,66 @@
+{
+  "name": "kis-cottage",
+  "version": "5.0.0",
+  "description": "Kisera Cottage open-source companion app with cinema room, long chat, persona core, and memory notes.",
+  "author": "Kisera001",
+  "type": "module",
+  "main": "electron/main.cjs",
+  "private": false,
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "dev:pwa": "set VITE_PWA_DEV=true&& vite --host 0.0.0.0",
+    "dev:pwa:https": "set VITE_PWA_DEV=true&& set VITE_HTTPS=true&& vite --host 0.0.0.0",
+    "build": "tsc -b && vite build",
+    "electron:icon": "node scripts/create-electron-icon.mjs",
+    "electron:dev": "node scripts/electron-dev.mjs",
+    "electron:pack": "npm run electron:icon && npm run build && electron-builder --dir",
+    "electron:build": "npm run electron:icon && npm run build && electron-builder --win nsis portable",
+    "test": "vitest run",
+    "preview": "vite preview --host 0.0.0.0",
+    "preview:pwa": "npm run build && vite preview --host 0.0.0.0",
+    "preview:pwa:https": "set VITE_HTTPS=true&& npm run build && vite preview --host 0.0.0.0",
+    "obsidian:bridge": "node scripts/obsidian-bridge.mjs",
+    "obsidian:bridge:lan": "set OBSIDIAN_BRIDGE_HOST=0.0.0.0&& node scripts/obsidian-bridge.mjs"
+  },
+  "dependencies": {
+    "lucide-react": "^0.468.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/react": "^19.0.1",
+    "@types/react-dom": "^19.0.2",
+    "@vitejs/plugin-react": "^4.3.4",
+    "electron": "^41.7.1",
+    "electron-builder": "^26.15.3",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.5",
+    "vitest": "^4.1.10"
+  },
+  "build": {
+    "appId": "com.kisera.kico",
+    "productName": "KI-CO Cottage",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
+  }
+}

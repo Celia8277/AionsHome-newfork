@@ -1,0 +1,2603 @@
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import type { User } from '@supabase/supabase-js'
+import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
+import ChatPage, { type ChatInjectionOptions } from './pages/ChatPage'
+import AuthPage from './pages/AuthPage'
+import SessionsDrawer from './components/SessionsDrawer'
+import type { ChatMessage, ChatSession, ChatToolCallStatus, ExtractMessageInput, LetterEntry, UserSettings } from './types'
+import {
+  createSession,
+  deleteMessage,
+  deleteSession,
+  loadSnapshot,
+  renameSession,
+  setSessionArchiveState,
+  setSnapshot,
+  updateSessionOverride,
+  updateSessionReasoningOverride,
+} from './storage/chatStorage'
+import {
+  createDefaultSettings,
+  ensureUserSettings,
+  saveSnackSystemPrompt,
+  saveMemoryAutoExtractEnabled,
+  saveMemoryExtractModel,
+  saveSyzygyPostSystemPrompt,
+  saveSyzygyReplySystemPrompt,
+  saveLetterReplySystemPrompt,
+  saveBubbleChatSettings,
+  saveLoungeScenePrompt,
+  updateUserSettings,
+} from './storage/userSettings'
+import { formatLocalTimestamp } from './utils/time'
+import { invokeMemoryExtraction } from './storage/memoryExtraction'
+import { useEnabledModels } from './hooks/useEnabledModels'
+import {
+  addRemoteMessage,
+  createRemoteSession,
+  deleteRemoteMessage,
+  deleteRemoteSession,
+  fetchLetters,
+  fetchLettersByConversation,
+  fetchRemoteMessages,
+  fetchRemoteSessions,
+  fetchPendingMemoryCount,
+  renameRemoteSession,
+  updateRemoteSessionArchiveState,
+  updateRemoteSessionOverride,
+  updateRemoteSessionReasoningOverride,
+} from './storage/supabaseSync'
+import { supabase } from './supabase/client'
+import './App.css'
+import SettingsPage from './pages/SettingsPage'
+import SnacksPage from './pages/SnacksPage'
+import SyzygyFeedPage from './pages/SyzygyFeedPage'
+import AgentFeedPage from './pages/AgentFeedPage'
+import MemoryVaultPage from './pages/MemoryVaultPage'
+import CheckinPage from './pages/CheckinPage'
+import ExportPage from './pages/ExportPage'
+import RpRoomsPage from './pages/RpRoomsPage'
+import RpRoomPage from './pages/RpRoomPage'
+import HomePage from './pages/HomePage'
+import HomeLayoutSettingsPage from './pages/HomeLayoutSettingsPage'
+import ForumPage from './pages/ForumPage'
+import ForumNewThreadPage from './pages/ForumNewThreadPage'
+import ForumThreadPage from './pages/ForumThreadPage'
+import ForumSettingsPage from './pages/ForumSettingsPage'
+import LettersPage from './pages/LettersPage'
+import StoryGroupPage from './pages/StoryGroupPage'
+import MemoPage from './pages/MemoPage'
+import TimelinePage from './pages/TimelinePage'
+import TodoPage from './pages/TodoPage'
+import HamsterConsolePage from './pages/HamsterConsolePage'
+import AgentCouncilPage from './pages/AgentCouncilPage'
+import ArchivePage from './pages/ArchivePage'
+import WalletPage from './pages/WalletPage'
+import WikiPage from './pages/WikiPage'
+import NovelPage from './pages/NovelPage'
+import LoungePage from './pages/LoungePage'
+import LoungeRoomPage, { type LoungeAiConfig } from './pages/LoungeRoomPage'
+import ConversationCanaryPage from './pages/ConversationCanaryPage'
+import RuntimeControlCanaryPage from './pages/RuntimeControlCanaryPage'
+import { loadHomeSettings } from './storage/homeLayout'
+import {
+  resolveSnackSystemOverlay,
+  resolveSyzygyPostPrompt,
+  resolveSyzygyReplyPrompt,
+  resolveLetterReplyPrompt,
+  resolveBubbleChatPrompt,
+} from './constants/aiOverlays'
+import { isGpt5Auto, resolveModelId } from './utils/modelResolver'
+import { extractLlmUsage, logLlmUsage } from './utils/llmUsage'
+import { buildMemoInjectionBlock, buildMemoInjectionFromToggle } from './utils/memoRetrieval'
+import { resolveTimelineFromToggle } from './utils/timelineManualRetrieval'
+import { callMcpTool, listMcpTools, type McpToolCallResult, type McpToolDefinition } from './lib/mcpTools'
+
+const sortSessions = (sessions: ChatSession[]) =>
+  [...sessions].sort(
+    (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+  )
+
+const sortMessages = (messages: ChatMessage[]) =>
+  [...messages].sort(
+    (a, b) =>
+      new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime() ||
+      new Date(a.clientCreatedAt ?? a.createdAt).getTime() -
+        new Date(b.clientCreatedAt ?? b.createdAt).getTime(),
+  )
+
+const selectMostRecentSession = (sessions: ChatSession[]) => {
+  if (sessions.length === 0) {
+    return null
+  }
+  return sessions.reduce<ChatSession>((latest, session) => {
+    const latestTime = new Date(latest.updatedAt ?? latest.createdAt).getTime()
+    const sessionTime = new Date(session.updatedAt ?? session.createdAt).getTime()
+    return sessionTime > latestTime ? session : latest
+  }, sessions[0])
+}
+
+const mergeMessages = (localMessages: ChatMessage[], remoteMessages: ChatMessage[]) => {
+  const merged = [...localMessages]
+  remoteMessages.forEach((message) => {
+    const index = merged.findIndex(
+      (existing) => existing.id === message.id || existing.clientId === message.clientId,
+    )
+    if (index === -1) {
+      merged.push(message)
+      return
+    }
+    const existing = merged[index]
+    merged[index] = {
+      ...existing,
+      ...message,
+      clientId: message.clientId ?? existing.clientId,
+      clientCreatedAt: message.clientCreatedAt ?? existing.clientCreatedAt,
+      pending: message.pending ?? false,
+    }
+  })
+  return sortMessages(merged)
+}
+
+const createClientId = () =>
+  globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`
+
+const defaultOpenRouterModel = 'openrouter/auto'
+const APP_DISPLAY_MODE_STORAGE_KEY = 'hamster-app-display-mode'
+type AppDisplayMode = 'phone' | 'game'
+type LetterToast = {
+  id: string
+  message: string
+}
+// 工具循环上限：最多执行 5 轮 tools/call，防止模型与工具间死循环。
+const MAX_TOOL_LOOP_ROUNDS = 5
+// 当模型/上游拒绝带 tools 的请求时记下来，本次会话内不再为它附带工具。
+const toolsUnsupportedModels = new Set<string>()
+
+const AUTO_EXTRACT_USER_TURN_INTERVAL = 12
+const AUTO_EXTRACT_COOLDOWN_MS = 10 * 60 * 1000
+const MEMORY_EXTRACT_RECENT_MESSAGES = 24
+const AUTO_EXTRACT_PENDING_LIMIT = 50
+const TIMELINE_MANUAL_DEBUG = import.meta.env.DEV
+
+const GameModeShell = lazy(() => import('./game/GameModeShell'))
+// 知识图谱页携带 react-force-graph-2d（d3 系），按需加载避免进主包。
+const KnowledgeLibraryPage = lazy(() => import('./pages/KnowledgeLibraryPage'))
+
+const updateMessage = (messages: ChatMessage[], next: ChatMessage) =>
+  sortMessages(
+    messages.map((message) =>
+      message.id === next.id || message.clientId === next.clientId
+        ? {
+            ...message,
+            ...next,
+            clientId: next.clientId ?? message.clientId,
+            clientCreatedAt: next.clientCreatedAt ?? message.clientCreatedAt,
+            pending: next.pending ?? false,
+          }
+        : message,
+    ),
+  )
+
+const initialSnapshot = loadSnapshot()
+
+const loadInitialDisplayMode = (): AppDisplayMode => {
+  if (typeof window === 'undefined') {
+    return 'phone'
+  }
+  const storedMode = window.localStorage.getItem(APP_DISPLAY_MODE_STORAGE_KEY)
+  return storedMode === 'game' ? 'game' : 'phone'
+}
+
+const buildOpenAiMessages = (
+  sessionId: string,
+  messages: ChatMessage[],
+  systemPrompt?: string,
+  linkedLetters: LetterEntry[] = [],
+  sendSurface: string = 'unknown',
+) => {
+  const trimmedPrompt = systemPrompt?.trim()
+  const compactLetterEvents = buildCompactLetterEvents(linkedLetters)
+  const history = messages
+    .filter(
+      (message) =>
+        message.sessionId === sessionId &&
+        message.content.trim().length > 0 &&
+        !message.meta?.streaming,
+    )
+    .map((message) => ({ role: message.role, content: message.content }))
+  const systemLayers: Array<{ role: 'system'; content: string }> = []
+  if (trimmedPrompt) {
+    systemLayers.push({ role: 'system', content: trimmedPrompt })
+  }
+  if (compactLetterEvents) {
+    systemLayers.push({ role: 'system', content: compactLetterEvents })
+  }
+  if (TIMELINE_MANUAL_DEBUG) {
+    console.info('[timeline-manual][request-builder]', {
+      surface: sendSurface,
+      systemPromptLength: trimmedPrompt?.length ?? 0,
+      systemPromptHasTimelineHeader: Boolean(trimmedPrompt?.includes('【时间轴】')),
+      systemLayerCount: systemLayers.length,
+    })
+  }
+  return [...systemLayers, ...history]
+}
+
+const LETTER_MODEL_CONTEXT_LIMIT = 400
+
+const buildLetterModelContext = (content: string) => {
+  const compact = content.replace(/\s+/g, ' ').trim()
+  if (compact.length <= LETTER_MODEL_CONTEXT_LIMIT) {
+    return compact
+  }
+  return `${compact.slice(0, LETTER_MODEL_CONTEXT_LIMIT)}…`
+}
+
+const buildCompactLetterEvents = (letters: LetterEntry[]) => {
+  if (letters.length === 0) {
+    return ''
+  }
+  const lines = letters.map((letter) => {
+    const model = letter.model?.trim() || 'unknown'
+    const content = buildLetterModelContext(letter.content)
+    return `[来信 from ${model} @ ${formatLocalTimestamp(letter.createdAt)}] ${content}`
+  })
+  return `Linked letter events in this conversation (compact summaries):\n${lines.join('\n')}`
+}
+
+const buildRecentExtractionMessages = (
+  sessionId: string,
+  messages: ChatMessage[],
+  limit: number,
+): ExtractMessageInput[] => {
+  const scoped = messages
+    .filter((message) => message.sessionId === sessionId && message.content.trim().length > 0)
+    .sort(
+      (a, b) =>
+        new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime() ||
+        new Date(a.clientCreatedAt ?? a.createdAt).getTime() -
+          new Date(b.clientCreatedAt ?? b.createdAt).getTime(),
+    )
+  return scoped.slice(-limit).map((message) => ({ role: message.role, content: message.content }))
+}
+
+const App = () => {
+  const navigate = useNavigate()
+  const location = useLocation()
+  const [appBackgroundImage, setAppBackgroundImage] = useState<string | null>(null)
+  const [sessions, setSessions] = useState<ChatSession[]>(initialSnapshot.sessions)
+  const [messages, setMessages] = useState<ChatMessage[]>(initialSnapshot.messages)
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  const [user, setUser] = useState<User | null>(null)
+  const [authReady, setAuthReady] = useState(false)
+  const [syncing, setSyncing] = useState(false)
+  const [isStreaming, setIsStreaming] = useState(false)
+  const [userSettings, setUserSettings] = useState<UserSettings | null>(null)
+  const [settingsReady, setSettingsReady] = useState(false)
+  const [sessionsReady, setSessionsReady] = useState(false)
+  const [activeChatSessionId, setActiveChatSessionId] = useState<string | null>(null)
+  const [displayMode, setDisplayMode] = useState<AppDisplayMode>(loadInitialDisplayMode)
+  const [isChatOpenedFromGameMode, setIsChatOpenedFromGameMode] = useState(false)
+  const [hasUnreadLetters, setHasUnreadLetters] = useState(false)
+  const [letterToast, setLetterToast] = useState<LetterToast | null>(null)
+  const sessionsRef = useRef(sessions)
+  const messagesRef = useRef(messages)
+  const streamingControllerRef = useRef<AbortController | null>(null)
+  const settingsRef = useRef<UserSettings | null>(null)
+  const autoExtractStateRef = useRef<Record<string, { lastUserCount: number; lastExtractedAt: number }>>({})
+  const knownLetterIdsRef = useRef<Set<string>>(new Set())
+  const letterToastTimeoutRef = useRef<number | null>(null)
+  const fallbackSettings = useMemo(
+    () => createDefaultSettings(user?.id ?? 'local'),
+    [user?.id],
+  )
+  const activeSettings = userSettings ?? fallbackSettings
+  const { enabledModelIds, defaultModelId: enabledDefaultModelId } = useEnabledModels(user)
+  const fallbackDefaultModelId =
+    activeSettings.defaultModel?.trim().length > 0
+      ? activeSettings.defaultModel
+      : defaultOpenRouterModel
+  const defaultModelId = enabledDefaultModelId ?? fallbackDefaultModelId
+  const enabledModels = useMemo(() => {
+    if (enabledModelIds.length > 0) {
+      const unique = new Set<string>(enabledModelIds)
+      unique.add(defaultModelId)
+      return Array.from(unique)
+    }
+    const unique = new Set<string>()
+    activeSettings.enabledModels.forEach((model) => unique.add(model))
+    unique.add(defaultModelId)
+    return Array.from(unique)
+  }, [activeSettings.enabledModels, defaultModelId, enabledModelIds])
+
+  const latestSession = useMemo(() => selectMostRecentSession(sessions), [sessions])
+
+  const showLetterToast = useCallback((message: string) => {
+    const toastId = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}`
+    setLetterToast({ id: toastId, message })
+  }, [])
+
+  useEffect(() => {
+    if (!letterToast) {
+      if (letterToastTimeoutRef.current !== null) {
+        window.clearTimeout(letterToastTimeoutRef.current)
+        letterToastTimeoutRef.current = null
+      }
+      return
+    }
+
+    if (letterToastTimeoutRef.current !== null) {
+      window.clearTimeout(letterToastTimeoutRef.current)
+    }
+
+    letterToastTimeoutRef.current = window.setTimeout(() => {
+      setLetterToast((current) => (current?.id === letterToast.id ? null : current))
+      letterToastTimeoutRef.current = null
+    }, 2600)
+
+    return () => {
+      if (letterToastTimeoutRef.current !== null) {
+        window.clearTimeout(letterToastTimeoutRef.current)
+        letterToastTimeoutRef.current = null
+      }
+    }
+  }, [letterToast])
+
+  useEffect(() => {
+    const client = supabase
+    if (!client || !user) {
+      knownLetterIdsRef.current = new Set()
+      setHasUnreadLetters(false)
+      return
+    }
+
+    let cancelled = false
+    const channel = client.channel(`letters-insert-${user.id}`)
+
+    const bootstrapRealtimeLetters = async () => {
+      try {
+        const existingLetters = await fetchLetters()
+        if (cancelled) {
+          return
+        }
+        knownLetterIdsRef.current = new Set(existingLetters.map((letter) => letter.id))
+        setHasUnreadLetters(existingLetters.some((letter) => !letter.isRead))
+      } catch (error) {
+        console.warn('初始化来信实时订阅失败', error)
+        if (!cancelled) {
+          knownLetterIdsRef.current = new Set()
+        }
+      }
+
+      if (cancelled) {
+        return
+      }
+
+      channel
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'letters',
+            filter: `user_id=eq.${user.id}`,
+          },
+          (payload) => {
+            const insertedLetter = payload.new as Partial<LetterEntry> & { id?: string; user_id?: string; is_read?: boolean | null }
+            const letterId = insertedLetter.id
+            const letterUserId = insertedLetter.userId ?? insertedLetter.user_id
+            if (!letterId || letterUserId !== user.id || knownLetterIdsRef.current.has(letterId)) {
+              return
+            }
+            knownLetterIdsRef.current.add(letterId)
+            setHasUnreadLetters(true)
+            showLetterToast('收到一封新来信')
+          },
+        )
+        .subscribe()
+    }
+
+    void bootstrapRealtimeLetters()
+
+    return () => {
+      cancelled = true
+      void client.removeChannel(channel)
+    }
+  }, [showLetterToast, user])
+  const feedAiConfigBase = useMemo(() => ({
+    reasoning: latestSession?.overrideReasoning ?? activeSettings.chatReasoningEnabled,
+    temperature: activeSettings.temperature,
+    topP: activeSettings.topP,
+    maxTokens: activeSettings.maxTokens,
+    systemPrompt: activeSettings.systemPrompt,
+    snackSystemOverlay: resolveSnackSystemOverlay(activeSettings.snackSystemOverlay),
+    syzygyPostSystemPrompt: resolveSyzygyPostPrompt(activeSettings.syzygyPostSystemPrompt),
+    syzygyReplySystemPrompt: resolveSyzygyReplyPrompt(activeSettings.syzygyReplySystemPrompt),
+    letterReplySystemPrompt: resolveLetterReplyPrompt(activeSettings.letterReplySystemPrompt),
+  }), [activeSettings, latestSession])
+  const snackAiConfig = useMemo(() => ({
+    ...feedAiConfigBase,
+    model: resolveModelId('snack', { defaultModelId }),
+  }), [defaultModelId, feedAiConfigBase])
+  const syzygyAiConfig = useMemo(() => ({
+    ...feedAiConfigBase,
+    model: resolveModelId('syzygy', { defaultModelId }),
+  }), [defaultModelId, feedAiConfigBase])
+  // 客厅复用日常聊天的默认模型与人格 Prompt：客厅里的 Syzygy 必须是同一个 Syzygy。
+  const loungeAiConfig = useMemo<LoungeAiConfig>(() => ({
+    model: resolveModelId('chitchat', { defaultModelId }),
+    systemPrompt: activeSettings.systemPrompt,
+    loungeScenePrompt: activeSettings.loungeScenePrompt,
+    temperature: activeSettings.temperature,
+    topP: activeSettings.topP,
+    maxTokens: activeSettings.maxTokens,
+    reasoningEnabled: activeSettings.chatReasoningEnabled,
+    highThinkingEnabled: activeSettings.chatHighThinkingEnabled,
+  }), [activeSettings, defaultModelId])
+  const bubbleChatConfig = useMemo(() => ({
+    model: activeSettings.bubbleChatModel?.trim() || resolveModelId('snack', { defaultModelId }),
+    systemPrompt: resolveBubbleChatPrompt(activeSettings.bubbleChatSystemPrompt),
+    temperature: activeSettings.bubbleChatTemperature,
+    maxTokens: activeSettings.bubbleChatMaxTokens,
+  }), [activeSettings.bubbleChatModel, activeSettings.bubbleChatSystemPrompt, activeSettings.bubbleChatTemperature, activeSettings.bubbleChatMaxTokens, defaultModelId])
+
+  useEffect(() => {
+    window.localStorage.setItem(APP_DISPLAY_MODE_STORAGE_KEY, displayMode)
+  }, [displayMode])
+
+
+  useEffect(() => {
+    const applyHomeBackground = () => {
+      const cached = loadHomeSettings()
+      const nextBackground = cached?.homeBackgroundImageDataUrl ?? null
+      setAppBackgroundImage((current) => (current === nextBackground ? current : nextBackground))
+    }
+
+    applyHomeBackground()
+    window.addEventListener('hamster-home-settings-changed', applyHomeBackground)
+    window.addEventListener('storage', applyHomeBackground)
+
+    return () => {
+      window.removeEventListener('hamster-home-settings-changed', applyHomeBackground)
+      window.removeEventListener('storage', applyHomeBackground)
+    }
+  }, [])
+
+  useEffect(() => {
+    sessionsRef.current = sessions
+  }, [sessions])
+
+  useEffect(() => {
+    messagesRef.current = messages
+  }, [messages])
+
+  useEffect(() => {
+    settingsRef.current = userSettings
+  }, [userSettings])
+
+  const applySnapshot = useCallback((nextSessions: ChatSession[], nextMessages: ChatMessage[]) => {
+    const orderedSessions = sortSessions(nextSessions)
+    const orderedMessages = sortMessages(nextMessages)
+    sessionsRef.current = orderedSessions
+    messagesRef.current = orderedMessages
+    setSessions(orderedSessions)
+    setMessages(orderedMessages)
+    setSnapshot({ sessions: orderedSessions, messages: orderedMessages })
+  }, [])
+
+  const refreshRemoteSessions = useCallback(async () => {
+    if (!user || !supabase) {
+      return
+    }
+    setSyncing(true)
+    try {
+      const [remoteSessions, remoteMessages] = await Promise.all([
+        fetchRemoteSessions(user.id),
+        fetchRemoteMessages(user.id),
+      ])
+      const nextSessions = sortSessions(remoteSessions)
+      const nextMessages = mergeMessages(messagesRef.current, remoteMessages)
+      applySnapshot(nextSessions, nextMessages)
+    } catch (error) {
+      console.warn('无法加载 Supabase 会话/消息数据', error)
+    } finally {
+      setSyncing(false)
+    }
+  }, [applySnapshot, user])
+
+  const refreshRemoteSessionMessages = useCallback(async (sessionId: string) => {
+    if (!user || !supabase) {
+      return
+    }
+    setSyncing(true)
+    try {
+      const remoteMessages = await fetchRemoteMessages(user.id, sessionId)
+      const nextMessages = mergeMessages(messagesRef.current, remoteMessages)
+      applySnapshot(sessionsRef.current, nextMessages)
+    } catch (error) {
+      console.warn('无法加载 Supabase 会话消息数据', error)
+    } finally {
+      setSyncing(false)
+    }
+  }, [applySnapshot, user])
+
+  const handleActiveSessionChange = useCallback((sessionId: string) => {
+    setActiveChatSessionId(sessionId)
+    void refreshRemoteSessionMessages(sessionId)
+  }, [refreshRemoteSessionMessages])
+
+  useEffect(() => {
+    if (!supabase) {
+      setAuthReady(true)
+      return
+    }
+    supabase.auth.getSession().then(({ data }) => {
+      setUser(data.session?.user ?? null)
+      setAuthReady(true)
+    })
+    const { data } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null)
+      setAuthReady(true)
+    })
+    return () => {
+      data.subscription.unsubscribe()
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!authReady) {
+      return
+    }
+    if (!user) {
+      setUserSettings(null)
+      setSettingsReady(true)
+      return
+    }
+    let active = true
+    setSettingsReady(false)
+    const loadSettings = async () => {
+      try {
+        const settings = await ensureUserSettings(user.id)
+        if (!active) {
+          return
+        }
+        setUserSettings(settings)
+      } catch (error) {
+        console.warn('无法加载用户设置', error)
+        if (!active) {
+          return
+        }
+        setUserSettings(createDefaultSettings(user.id))
+      } finally {
+        if (active) {
+          setSettingsReady(true)
+        }
+      }
+    }
+    loadSettings()
+    return () => {
+      active = false
+    }
+  }, [authReady, user])
+
+  useEffect(() => {
+    if (!authReady) {
+      return
+    }
+    if (!user) {
+      const fallback = loadSnapshot()
+      applySnapshot(fallback.sessions, fallback.messages)
+      setSessionsReady(true)
+      return
+    }
+    let active = true
+    const loadRemote = async () => {
+      setSessionsReady(false)
+      setSyncing(true)
+      try {
+        const [remoteSessions, remoteMessages] = await Promise.all([
+          fetchRemoteSessions(user.id),
+          fetchRemoteMessages(user.id),
+        ])
+        if (!active) {
+          return
+        }
+        const nextSessions = sortSessions(remoteSessions)
+        const nextMessages = mergeMessages(messagesRef.current, remoteMessages)
+        applySnapshot(nextSessions, nextMessages)
+      } catch (error) {
+        console.warn('无法加载 Supabase 数据', error)
+      } finally {
+        if (active) {
+          setSyncing(false)
+          setSessionsReady(true)
+        }
+      }
+    }
+    loadRemote()
+    return () => {
+      active = false
+    }
+  }, [applySnapshot, authReady, user])
+
+  useEffect(() => {
+    if (!drawerOpen) {
+      return
+    }
+    void refreshRemoteSessions()
+  }, [drawerOpen, refreshRemoteSessions])
+
+  useEffect(() => {
+    if (!user) {
+      return
+    }
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        void refreshRemoteSessions()
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [refreshRemoteSessions, user])
+
+  useEffect(() => {
+    const client = supabase
+    if (!client || !user) {
+      return
+    }
+
+    const channel = client
+      .channel(`daily-chat-sync-${user.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'sessions',
+          filter: `user_id=eq.${user.id}`,
+        },
+        () => {
+          void refreshRemoteSessions()
+        },
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'messages',
+          filter: `user_id=eq.${user.id}`,
+        },
+        () => {
+          void refreshRemoteSessions()
+        },
+      )
+      .subscribe()
+
+    return () => {
+      void client.removeChannel(channel)
+    }
+  }, [refreshRemoteSessions, user])
+
+  const messageCounts = useMemo(() => {
+    return messages.reduce<Record<string, number>>((accumulator, message) => {
+      accumulator[message.sessionId] = (accumulator[message.sessionId] ?? 0) + 1
+      return accumulator
+    }, {})
+  }, [messages])
+
+  const resolveSessionModel = useCallback(
+    (sessionId: string) => {
+      const fallback = createDefaultSettings(user?.id ?? 'local')
+      const settings = settingsRef.current ?? fallback
+      const baseDefaultModel =
+        settings.defaultModel?.trim().length > 0
+          ? settings.defaultModel
+          : defaultOpenRouterModel
+      const selectedModel = sessionsRef.current.find((session) => session.id === sessionId)?.overrideModel ?? null
+      return resolveModelId('chitchat', {
+        defaultModelId: baseDefaultModel,
+        chitchatSelectedModelId: selectedModel,
+      })
+    },
+    [user?.id],
+  )
+
+  const resolveSessionReasoning = useCallback((sessionId: string) => {
+    const fallback = createDefaultSettings(user?.id ?? 'local')
+    const settings = settingsRef.current ?? fallback
+    const overrideReasoning = sessionsRef.current.find((session) => session.id === sessionId)
+      ?.overrideReasoning
+    return overrideReasoning ?? settings.chatReasoningEnabled
+  }, [user?.id])
+
+  const createSessionEntry = useCallback(
+    async (title?: string) => {
+      const sessionTitle = title ?? '新会话'
+      if (user && supabase) {
+        try {
+          const remoteSession = await createRemoteSession(user.id, sessionTitle)
+          const nextSessions = sortSessions([...sessionsRef.current, remoteSession])
+          applySnapshot(nextSessions, messagesRef.current)
+          return remoteSession
+        } catch (error) {
+          console.warn('创建云端会话失败，已切换本地存储', error)
+        }
+      }
+      const newSession = createSession(sessionTitle)
+      setSessions((prev) => sortSessions([...prev, newSession]))
+      return newSession
+    },
+    [applySnapshot, user],
+  )
+
+  const openChatFromGameMode = useCallback((_npcId: 'syzygy') => {
+    void _npcId
+    setIsChatOpenedFromGameMode(true)
+    const latest = selectMostRecentSession(sessionsRef.current)
+    if (latest) {
+      navigate(`/chat/${latest.id}`)
+      setDisplayMode('phone')
+      return
+    }
+
+    void createSessionEntry().then((session) => {
+      navigate(`/chat/${session.id}`)
+      setDisplayMode('phone')
+    })
+  }, [createSessionEntry, navigate])
+
+  const handleReturnToGameFromChat = useCallback(() => {
+    setIsChatOpenedFromGameMode(false)
+    setDisplayMode('game')
+  }, [])
+
+  const openChatFromPhoneMode = useCallback(
+    (sessionId: string) => {
+      setIsChatOpenedFromGameMode(false)
+      navigate(`/chat/${sessionId}`)
+    },
+    [navigate],
+  )
+
+  useEffect(() => {
+    if (!location.pathname.startsWith('/chat/')) {
+      setIsChatOpenedFromGameMode(false)
+    }
+  }, [location.pathname])
+
+  const renameSessionEntry = useCallback(
+    async (sessionId: string, title: string) => {
+      if (user && supabase) {
+        try {
+          const updated = await renameRemoteSession(sessionId, title)
+          const nextSessions = sessionsRef.current.map((session) =>
+            session.id === sessionId ? updated : session,
+          )
+          applySnapshot(nextSessions, messagesRef.current)
+          return
+        } catch (error) {
+          console.warn('更新云端会话失败，已切换本地存储', error)
+        }
+      }
+      const updated = renameSession(sessionId, title)
+      if (!updated) {
+        return
+      }
+      setSessions((prev) =>
+        prev.map((session) => (session.id === sessionId ? updated : session)),
+      )
+    },
+    [applySnapshot, user],
+  )
+
+  const handleSessionOverrideChange = useCallback(
+    async (sessionId: string, overrideModel: string | null) => {
+      const normalized = overrideModel?.trim().length ? overrideModel.trim() : null
+      if (user && supabase) {
+        try {
+          const updated = await updateRemoteSessionOverride(sessionId, normalized)
+          const nextSessions = sessionsRef.current.map((session) =>
+            session.id === sessionId ? updated : session,
+          )
+          applySnapshot(nextSessions, messagesRef.current)
+          return
+        } catch (error) {
+          console.warn('更新云端会话模型失败，已切换本地存储', error)
+        }
+      }
+      const updated = updateSessionOverride(sessionId, normalized)
+      if (!updated) {
+        return
+      }
+      setSessions((prev) =>
+        prev.map((session) => (session.id === sessionId ? updated : session)),
+      )
+    },
+    [applySnapshot, user],
+  )
+
+  const handleSessionReasoningOverrideChange = useCallback(
+    async (sessionId: string, overrideReasoning: boolean | null) => {
+      if (user && supabase) {
+        try {
+          const updated = await updateRemoteSessionReasoningOverride(
+            sessionId,
+            overrideReasoning,
+          )
+          const nextSessions = sessionsRef.current.map((session) =>
+            session.id === sessionId ? updated : session,
+          )
+          applySnapshot(nextSessions, messagesRef.current)
+          return
+        } catch (error) {
+          console.warn('更新云端会话思考链失败，已切换本地存储', error)
+        }
+      }
+      const updated = updateSessionReasoningOverride(sessionId, overrideReasoning)
+      if (!updated) {
+        return
+      }
+      setSessions((prev) =>
+        prev.map((session) => (session.id === sessionId ? updated : session)),
+      )
+    },
+    [applySnapshot, user],
+  )
+
+  const handleSessionArchiveStateChange = useCallback(
+    async (sessionId: string, isArchived: boolean) => {
+      if (user && supabase) {
+        try {
+          const updated = await updateRemoteSessionArchiveState(sessionId, isArchived)
+          const nextSessions = sessionsRef.current.map((session) =>
+            session.id === sessionId ? updated : session,
+          )
+          applySnapshot(nextSessions, messagesRef.current)
+          return
+        } catch (error) {
+          console.warn('更新云端会话抽屉状态失败，已切换本地存储', error)
+        }
+      }
+      const updated = setSessionArchiveState(sessionId, isArchived)
+      if (!updated) {
+        return
+      }
+      setSessions((prev) =>
+        prev.map((session) => (session.id === sessionId ? updated : session)),
+      )
+    },
+    [applySnapshot, user],
+  )
+
+
+  const sendMessage = useCallback(
+    async (sessionId: string, content: string, injectionOptions?: ChatInjectionOptions) => {
+      const fallbackSettings = createDefaultSettings(user?.id ?? 'local')
+      const activeSettings = settingsRef.current ?? fallbackSettings
+      const effectiveModel = resolveSessionModel(sessionId)
+      const reasoningEnabled = resolveSessionReasoning(sessionId)
+      const highThinkingEnabled = activeSettings.chatHighThinkingEnabled
+      const paramsSnapshot = {
+        temperature: activeSettings.temperature,
+        top_p: activeSettings.topP,
+        max_tokens: activeSettings.maxTokens,
+      }
+      const systemPrompt = activeSettings.systemPrompt
+      const clientId = createClientId()
+      const clientCreatedAt = new Date().toISOString()
+      const optimisticMessage: ChatMessage = {
+        id: clientId,
+        sessionId,
+        role: 'user',
+        content,
+        createdAt: clientCreatedAt,
+        clientId,
+        clientCreatedAt,
+        meta: {},
+        pending: true,
+      }
+      const assistantClientId = createClientId()
+      const assistantClientCreatedAt = new Date(
+        new Date(clientCreatedAt).getTime() + 200,
+      ).toISOString()
+      const optimisticAssistant: ChatMessage = {
+        id: assistantClientId,
+        sessionId,
+        role: 'assistant',
+        content: '',
+        createdAt: assistantClientCreatedAt,
+        clientId: assistantClientId,
+        clientCreatedAt: assistantClientCreatedAt,
+        meta: {
+          model: effectiveModel,
+          provider: 'openrouter',
+          streaming: true,
+          params: paramsSnapshot,
+        },
+        pending: true,
+      }
+      const nextMessages = sortMessages([
+        ...messagesRef.current,
+        optimisticMessage,
+        optimisticAssistant,
+      ])
+      const nextSessions = sessionsRef.current.map((session) =>
+        session.id === sessionId ? { ...session, updatedAt: clientCreatedAt } : session,
+      )
+      applySnapshot(nextSessions, nextMessages)
+
+      const persist = async () => {
+        if (!user || !supabase) {
+          const localMessages = updateMessage(messagesRef.current, {
+            ...optimisticMessage,
+            pending: false,
+          })
+          const assistantMessage: ChatMessage = {
+            id: assistantClientId,
+            sessionId,
+            role: 'assistant',
+            content: '当前未登录或服务未配置，无法获取回复。',
+            createdAt: assistantClientCreatedAt,
+            clientId: assistantClientId,
+            clientCreatedAt: assistantClientCreatedAt,
+            meta: { model: 'offline', provider: 'openrouter' },
+            pending: false,
+          }
+          const localNextMessages = sortMessages([...localMessages, assistantMessage])
+          const localNextSessions = sessionsRef.current.map((session) =>
+            session.id === sessionId
+              ? { ...session, updatedAt: assistantClientCreatedAt }
+              : session,
+          )
+          applySnapshot(localNextSessions, localNextMessages)
+          return
+        }
+
+        try {
+          const { message: savedUserMessage, updatedAt } = await addRemoteMessage(
+            sessionId,
+            user.id,
+            'user',
+            content,
+            clientId,
+            clientCreatedAt,
+            {},
+          )
+          const updatedMessages = updateMessage(messagesRef.current, {
+            ...savedUserMessage,
+            pending: false,
+          })
+          const updatedSessions = sessionsRef.current.map((session) =>
+            session.id === sessionId ? { ...session, updatedAt } : session,
+          )
+          applySnapshot(updatedSessions, updatedMessages)
+        } catch (error) {
+          console.warn('写入云端消息失败', error)
+          window.alert('发送失败，请稍后重试。')
+          return
+        }
+
+        let assistantContent = ''
+        let reasoningContent = ''
+        let reasoningType: 'reasoning' | 'thinking' | null = null
+        let actualModel = effectiveModel
+        let pendingDelta = ''
+        let pendingReasoningDelta = ''
+        let flushTimer: number | null = null
+        let thinkCarry = ''
+        let isInThink = false
+        const toolStatuses: ChatToolCallStatus[] = []
+
+        const openTag = '<think>'
+        const closeTag = '</think>'
+        const reasoningFields: Array<{
+          key: 'reasoning' | 'thinking' | 'reasoning_content' | 'thinking_content'
+          type: 'reasoning' | 'thinking'
+        }> = [
+          { key: 'reasoning', type: 'reasoning' },
+          { key: 'thinking', type: 'thinking' },
+          { key: 'reasoning_content', type: 'reasoning' },
+          { key: 'thinking_content', type: 'thinking' },
+        ]
+
+        const collectReasoningFromObject = (
+          source: Record<string, unknown> | null | undefined,
+        ) => {
+          if (!source) {
+            return { text: '', type: null as typeof reasoningType }
+          }
+          let text = ''
+          let type: typeof reasoningType = null
+          for (const field of reasoningFields) {
+            const value = source[field.key]
+            if (typeof value === 'string' && value.length > 0) {
+              text += value
+              if (!type) {
+                type = field.type
+              }
+            }
+          }
+          return { text, type }
+        }
+
+        const findPartialSuffix = (text: string, tag: string) => {
+          const maxLength = Math.min(tag.length - 1, text.length)
+          for (let length = maxLength; length > 0; length -= 1) {
+            const fragment = tag.slice(0, length)
+            if (text.endsWith(fragment)) {
+              return fragment
+            }
+          }
+          return ''
+        }
+
+        const splitReasoningFromContent = (delta: string) => {
+          let text = `${thinkCarry}${delta}`
+          thinkCarry = ''
+          let contentChunk = ''
+          let reasoningChunk = ''
+
+          while (text.length > 0) {
+            if (isInThink) {
+              const closeIndex = text.indexOf(closeTag)
+              if (closeIndex === -1) {
+                const partial = findPartialSuffix(text, closeTag)
+                const cutoff = text.length - partial.length
+                reasoningChunk += text.slice(0, cutoff)
+                thinkCarry = partial
+                text = ''
+              } else {
+                reasoningChunk += text.slice(0, closeIndex)
+                text = text.slice(closeIndex + closeTag.length)
+                isInThink = false
+              }
+            } else {
+              const openIndex = text.indexOf(openTag)
+              if (openIndex === -1) {
+                const partial = findPartialSuffix(text, openTag)
+                const cutoff = text.length - partial.length
+                contentChunk += text.slice(0, cutoff)
+                thinkCarry = partial
+                text = ''
+              } else {
+                contentChunk += text.slice(0, openIndex)
+                text = text.slice(openIndex + openTag.length)
+                isInThink = true
+              }
+            }
+          }
+
+          return { contentChunk, reasoningChunk }
+        }
+
+        const appendReasoningDelta = (
+          text: string,
+          type: typeof reasoningType,
+          target: 'pending' | 'final' = 'pending',
+        ) => {
+          if (!text) {
+            return
+          }
+          if (target === 'pending') {
+            pendingReasoningDelta += text
+          } else {
+            reasoningContent += text
+          }
+          if (!reasoningType && type) {
+            reasoningType = type
+          }
+        }
+
+        const buildAssistantMeta = (streaming: boolean): ChatMessage['meta'] => {
+          const meta: ChatMessage['meta'] = {
+            model: actualModel,
+            provider: 'openrouter',
+            streaming,
+            params: paramsSnapshot,
+          }
+          if (reasoningContent) {
+            meta.reasoning = reasoningContent
+            meta.reasoning_text = reasoningContent
+          }
+          if (reasoningType) {
+            meta.reasoning_type = reasoningType
+          }
+          if (toolStatuses.length > 0) {
+            meta.toolCalls = toolStatuses.map((status) => ({ ...status }))
+          }
+          return meta
+        }
+
+        const flushPending = () => {
+          if (!pendingDelta && !pendingReasoningDelta) {
+            return
+          }
+          if (pendingDelta) {
+            assistantContent += pendingDelta
+            pendingDelta = ''
+          }
+          if (pendingReasoningDelta) {
+            reasoningContent += pendingReasoningDelta
+            pendingReasoningDelta = ''
+          }
+          const streamingUpdate = updateMessage(messagesRef.current, {
+            id: assistantClientId,
+            sessionId,
+            role: 'assistant',
+            clientId: assistantClientId,
+            content: assistantContent,
+            createdAt: assistantClientCreatedAt,
+            clientCreatedAt: assistantClientCreatedAt,
+            meta: buildAssistantMeta(true),
+            pending: true,
+          })
+          applySnapshot(sessionsRef.current, streamingUpdate)
+        }
+
+        const scheduleFlush = () => {
+          if (flushTimer !== null) {
+            return
+          }
+          flushTimer = window.setTimeout(() => {
+            flushTimer = null
+            flushPending()
+          }, 50)
+        }
+
+        try {
+          const { data } = await supabase.auth.getSession()
+          const accessToken = data.session?.access_token
+          if (!accessToken) {
+            window.alert('登录状态异常，请重新登录')
+            return
+          }
+          const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
+          if (!anonKey) {
+            window.alert('Supabase 环境变量未配置')
+            return
+          }
+          let linkedLetters: LetterEntry[] = []
+          try {
+            linkedLetters = await fetchLettersByConversation(sessionId)
+          } catch (error) {
+            console.warn('无法加载会话关联来信上下文', error)
+          }
+          const memoInjectionBlock = injectionOptions?.memoEnabled
+            ? await buildMemoInjectionFromToggle(content)
+            : await buildMemoInjectionBlock(content)
+          const manualTimelineResult = injectionOptions?.timelineEnabled
+            ? await resolveTimelineFromToggle(content)
+            : { detected: false, parsedRange: null, entries: [] as Array<{ eventDate: string; summary: string; recorder: string; createdAt: string }>, timelineText: null }
+          const manualTimelineBlock = manualTimelineResult.timelineText?.trim() ?? ''
+          const hasManualTimelineBlock = manualTimelineBlock.length > 0
+          const requestSystemPrompt = memoInjectionBlock
+            ? [systemPrompt, memoInjectionBlock].filter((item): item is string => Boolean(item?.trim())).join('\n\n')
+            : systemPrompt
+          const requestSystemPromptWithTimeline = hasManualTimelineBlock
+            && !requestSystemPrompt.includes(manualTimelineBlock)
+            ? [requestSystemPrompt, manualTimelineBlock]
+                .filter((item): item is string => Boolean(item?.trim()))
+                .join('\n\n')
+            : requestSystemPrompt
+          if (TIMELINE_MANUAL_DEBUG) {
+            const parsedRange = manualTimelineResult.parsedRange
+              ? `${manualTimelineResult.parsedRange.startDate} -> ${manualTimelineResult.parsedRange.endDate}`
+              : 'none'
+            console.info('[timeline-manual][send]', {
+              surface: 'daily-chat/openrouter-chat',
+              detected: manualTimelineResult.detected,
+              parsedRange,
+              fetchedEntryCount: manualTimelineResult.entries.length,
+              timelineTextLength: manualTimelineBlock.length,
+              augmentationIncludesTimelineBlock:
+                hasManualTimelineBlock && requestSystemPromptWithTimeline.includes(manualTimelineBlock),
+              augmentationHasTimelineHeader: requestSystemPromptWithTimeline.includes('【时间轴】'),
+            })
+          }
+          const messagesPayload = buildOpenAiMessages(
+            sessionId,
+            messagesRef.current,
+            requestSystemPromptWithTimeline,
+            linkedLetters,
+            'daily-chat/openrouter-chat',
+          )
+          const isClaudeModel = (model: string) => /claude|anthropic/i.test(model)
+          const requestBody: Record<string, unknown> = {
+            model: effectiveModel,
+            modelId: effectiveModel,
+            module: 'chitchat',
+            conversationId: sessionId,
+            messages: messagesPayload,
+            temperature: paramsSnapshot.temperature,
+            top_p: paramsSnapshot.top_p,
+            max_tokens: paramsSnapshot.max_tokens,
+            stream: true,
+          }
+          if (reasoningEnabled) {
+            requestBody.reasoning = highThinkingEnabled && isGpt5Auto(effectiveModel)
+              ? { effort: 'high' }
+              : true
+          }
+          if (reasoningEnabled && isClaudeModel(effectiveModel)) {
+            const maxTokens = paramsSnapshot.max_tokens ?? 1024
+            requestBody.thinking = {
+              type: 'enabled',
+              budget_tokens: Math.max(256, Math.min(1024, maxTokens)),
+            }
+          }
+          const controller = new AbortController()
+          streamingControllerRef.current?.abort()
+          streamingControllerRef.current = controller
+          setIsStreaming(true)
+
+          // hamster-mcp 工具列表：仅在用户点亮「工具」按钮时注入（方案 A：单次生效）。
+          // 工具定义有 40+ 条且每轮全量发送、绕过历史压缩，默认不注入可显著降低费用。
+          let mcpTools: McpToolDefinition[] | null = null
+          if (injectionOptions?.toolsEnabled && !toolsUnsupportedModels.has(effectiveModel)) {
+            try {
+              mcpTools = await listMcpTools({ accessToken, anonKey }, controller.signal)
+            } catch (error) {
+              console.warn('获取 MCP 工具列表失败，本次对话不附带工具', error)
+            }
+          }
+
+          const postChatRound = (body: Record<string, unknown>) =>
+            fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/openrouter-chat`, {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${accessToken}`,
+                apikey: anonKey,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify(body),
+              signal: controller.signal,
+            })
+
+          const forceAssistantUpdate = () => {
+            const streamingUpdate = updateMessage(messagesRef.current, {
+              id: assistantClientId,
+              sessionId,
+              role: 'assistant',
+              clientId: assistantClientId,
+              content: assistantContent,
+              createdAt: assistantClientCreatedAt,
+              clientCreatedAt: assistantClientCreatedAt,
+              meta: buildAssistantMeta(true),
+              pending: true,
+            })
+            applySnapshot(sessionsRef.current, streamingUpdate)
+          }
+
+          const loopMessages: Array<Record<string, unknown>> = [...messagesPayload]
+          let toolsEnabled = Boolean(mcpTools && mcpTools.length > 0)
+          let toolRounds = 0
+          // 同名工具连续失败 2 次即熔断：后续轮次不再附带 tools，让模型直接收尾。
+          const toolFailureStreaks = new Map<string, number>()
+
+          while (true) {
+            const includeTools = toolsEnabled && toolRounds < MAX_TOOL_LOOP_ROUNDS
+            const roundBody: Record<string, unknown> = { ...requestBody, messages: loopMessages }
+            if (toolRounds > 0) {
+              // 工具循环的后续请求自带完整 tool 上下文；去掉 conversationId，
+              // 避免服务端运行时压缩用数据库历史重建消息时丢掉工具结果。
+              delete roundBody.conversationId
+            }
+            if (includeTools) {
+              roundBody.tools = mcpTools
+            }
+
+            let response = await postChatRound(roundBody)
+            if (!response.ok && includeTools && response.status >= 400 && response.status < 500) {
+              // 模型或上游不支持 function calling：降级为不带 tools 重发本轮。
+              const originalError = await response.text()
+              console.warn('带 tools 的请求被上游拒绝，尝试降级重试', {
+                model: effectiveModel,
+                status: response.status,
+                error: originalError.slice(0, 200),
+              })
+              const fallbackBody = { ...roundBody }
+              delete fallbackBody.tools
+              const fallbackResponse = await postChatRound(fallbackBody)
+              if (fallbackResponse.ok) {
+                toolsUnsupportedModels.add(effectiveModel)
+                toolsEnabled = false
+              }
+              response = fallbackResponse
+            }
+            if (!response.ok) {
+              const errorText = await response.text()
+              throw new Error(errorText || '请求失败')
+            }
+
+            const roundToolCalls: Array<{ id?: string; name: string; argumentsText: string }> = []
+            let roundUsage: Record<string, unknown> | null = null
+            flushPending()
+            const contentLengthAtRoundStart = assistantContent.length
+
+            const contentType = response.headers.get('content-type') ?? ''
+            const isEventStream = contentType.includes('text/event-stream')
+          if (!isEventStream) {
+            try {
+              const payload = (await response.json()) as Record<string, unknown>
+              if (typeof payload?.model === 'string') {
+                actualModel = payload.model
+              }
+              roundUsage = extractLlmUsage(payload)
+              const choice = (payload as { choices?: unknown[] })?.choices?.[0] as
+                | Record<string, unknown>
+                | undefined
+              const message = (choice?.message as Record<string, unknown>) ?? choice ?? {}
+              const content =
+                typeof message?.content === 'string'
+                  ? (message.content as string)
+                  : typeof (choice as { text?: unknown })?.text === 'string'
+                    ? ((choice as { text?: unknown }).text as string)
+                    : ''
+              if (content) {
+                const { contentChunk, reasoningChunk } = splitReasoningFromContent(content)
+                assistantContent += contentChunk
+                if (reasoningChunk) {
+                  appendReasoningDelta(reasoningChunk, 'thinking', 'final')
+                }
+              }
+              const rawToolCalls = (message as { tool_calls?: unknown }).tool_calls
+              if (Array.isArray(rawToolCalls)) {
+                for (const item of rawToolCalls) {
+                  if (!item || typeof item !== 'object') {
+                    continue
+                  }
+                  const candidate = item as {
+                    id?: unknown
+                    function?: { name?: unknown; arguments?: unknown }
+                  }
+                  const name = typeof candidate.function?.name === 'string' ? candidate.function.name : ''
+                  if (!name) {
+                    continue
+                  }
+                  roundToolCalls.push({
+                    id: typeof candidate.id === 'string' && candidate.id ? candidate.id : undefined,
+                    name,
+                    argumentsText:
+                      typeof candidate.function?.arguments === 'string'
+                        ? candidate.function.arguments
+                        : JSON.stringify(candidate.function?.arguments ?? {}),
+                  })
+                }
+              }
+              const messageReasoning = collectReasoningFromObject(message)
+              if (messageReasoning.text) {
+                appendReasoningDelta(messageReasoning.text, messageReasoning.type, 'final')
+              }
+              if (choice && choice !== message) {
+                const choiceReasoning = collectReasoningFromObject(choice)
+                if (choiceReasoning.text) {
+                  appendReasoningDelta(choiceReasoning.text, choiceReasoning.type, 'final')
+                }
+              }
+              if (payload && payload !== choice) {
+                const payloadReasoning = collectReasoningFromObject(payload)
+                if (payloadReasoning.text) {
+                  appendReasoningDelta(payloadReasoning.text, payloadReasoning.type, 'final')
+                }
+              }
+              forceAssistantUpdate()
+            } catch (error) {
+              console.warn('解析非流式响应失败', error)
+              throw error
+            }
+          } else {
+            if (!response.body) {
+              throw new Error('响应体为空')
+            }
+            const reader = response.body.getReader()
+            const decoder = new TextDecoder('utf-8')
+            let buffer = ''
+            let done = false
+            while (!done) {
+              const { value, done: readerDone } = await reader.read()
+              if (readerDone) {
+                break
+              }
+              buffer += decoder.decode(value, { stream: true })
+              const events = buffer.split('\n\n')
+              buffer = events.pop() ?? ''
+              for (const event of events) {
+                const data = event
+                  .split('\n')
+                  .map((line) => line.trim())
+                  .filter((line) => line.startsWith('data:'))
+                  .map((line) => line.replace(/^data:\s*/, ''))
+                  .join('\n')
+                if (!data) {
+                  continue
+                }
+                if (data === '[DONE]') {
+                  done = true
+                  break
+                }
+                try {
+                  const payload = JSON.parse(data)
+                  const deltaPayload = payload?.choices?.[0]?.delta ?? {}
+                  const delta = typeof deltaPayload?.content === 'string' ? deltaPayload.content : ''
+                  if (payload?.model) {
+                    actualModel = payload.model
+                  }
+                  // OpenRouter 在流末尾的 chunk 携带 usage。
+                  roundUsage = extractLlmUsage(payload) ?? roundUsage
+                  const deltaToolCalls = (deltaPayload as { tool_calls?: unknown })?.tool_calls
+                  if (Array.isArray(deltaToolCalls)) {
+                    for (const item of deltaToolCalls) {
+                      if (!item || typeof item !== 'object') {
+                        continue
+                      }
+                      const candidate = item as {
+                        index?: unknown
+                        id?: unknown
+                        function?: { name?: unknown; arguments?: unknown }
+                      }
+                      const slotIndex =
+                        typeof candidate.index === 'number' ? candidate.index : roundToolCalls.length
+                      while (roundToolCalls.length <= slotIndex) {
+                        roundToolCalls.push({ id: undefined, name: '', argumentsText: '' })
+                      }
+                      const slot = roundToolCalls[slotIndex]
+                      if (typeof candidate.id === 'string' && candidate.id) {
+                        slot.id = candidate.id
+                      }
+                      if (typeof candidate.function?.name === 'string' && candidate.function.name && !slot.name) {
+                        slot.name = candidate.function.name
+                      }
+                      if (typeof candidate.function?.arguments === 'string') {
+                        slot.argumentsText += candidate.function.arguments
+                      }
+                    }
+                  }
+                  const explicitReasoning =
+                    typeof deltaPayload?.reasoning === 'string' && deltaPayload.reasoning.length > 0
+                      ? deltaPayload.reasoning
+                      : ''
+                  if (explicitReasoning) {
+                    appendReasoningDelta(explicitReasoning, 'reasoning')
+                    scheduleFlush()
+                  }
+                  const deltaReasoning = collectReasoningFromObject(
+                    deltaPayload as Record<string, unknown>,
+                  )
+                  if (deltaReasoning.text && deltaReasoning.text !== explicitReasoning) {
+                    appendReasoningDelta(deltaReasoning.text, deltaReasoning.type)
+                    scheduleFlush()
+                  }
+                  if (delta) {
+                    const { contentChunk, reasoningChunk } = splitReasoningFromContent(delta)
+                    if (contentChunk) {
+                      pendingDelta += contentChunk
+                    }
+                    if (reasoningChunk) {
+                      appendReasoningDelta(reasoningChunk, 'thinking')
+                    }
+                    scheduleFlush()
+                  }
+                } catch (error) {
+                  console.warn('解析流式响应失败', error)
+                }
+              }
+            }
+
+            if (flushTimer !== null) {
+              window.clearTimeout(flushTimer)
+              flushTimer = null
+            }
+            flushPending()
+          }
+
+            logLlmUsage(
+              { module: 'chitchat', conversationId: sessionId, model: actualModel },
+              roundUsage,
+            )
+
+            const executableToolCalls = roundToolCalls.filter((call) => call.name)
+            if (!includeTools || executableToolCalls.length === 0) {
+              break
+            }
+
+            // 把本轮 assistant 输出与工具结果追加进上下文，再请求模型，直至产出普通回复。
+            toolRounds += 1
+            const roundContent = assistantContent.slice(contentLengthAtRoundStart)
+            const normalizedCalls = executableToolCalls.map((call, index) => ({
+              id: call.id ?? `call_${toolRounds}_${index}`,
+              name: call.name,
+              argumentsText: call.argumentsText || '{}',
+            }))
+            loopMessages.push({
+              role: 'assistant',
+              content: roundContent,
+              tool_calls: normalizedCalls.map((call) => ({
+                id: call.id,
+                type: 'function',
+                function: { name: call.name, arguments: call.argumentsText },
+              })),
+            })
+            for (const call of normalizedCalls) {
+              const statusEntry: ChatToolCallStatus = { name: call.name, status: 'running' }
+              toolStatuses.push(statusEntry)
+              forceAssistantUpdate()
+              let result: McpToolCallResult
+              try {
+                result = await callMcpTool(
+                  { accessToken, anonKey },
+                  call.name,
+                  call.argumentsText,
+                  controller.signal,
+                )
+              } catch (error) {
+                // 用户主动中止：先把状态标为失败再抛出，避免持久化的状态条停留在"执行中"。
+                statusEntry.status = 'error'
+                forceAssistantUpdate()
+                throw error
+              }
+              statusEntry.status = result.ok ? 'done' : 'error'
+              forceAssistantUpdate()
+              if (result.ok) {
+                toolFailureStreaks.delete(call.name)
+              } else {
+                const failures = (toolFailureStreaks.get(call.name) ?? 0) + 1
+                toolFailureStreaks.set(call.name, failures)
+                if (failures >= 2) {
+                  toolsEnabled = false
+                }
+              }
+              loopMessages.push({
+                role: 'tool',
+                tool_call_id: call.id,
+                content: result.text,
+              })
+            }
+          }
+
+          const { message: assistantMessage, updatedAt } = await addRemoteMessage(
+            sessionId,
+            user.id,
+            'assistant',
+            assistantContent,
+            assistantClientId,
+            assistantClientCreatedAt,
+            buildAssistantMeta(false),
+          )
+          const updatedMessages = updateMessage(messagesRef.current, {
+            ...assistantMessage,
+            pending: false,
+          })
+          const updatedSessions = sessionsRef.current.map((session) =>
+            session.id === sessionId ? { ...session, updatedAt } : session,
+          )
+          applySnapshot(updatedSessions, updatedMessages)
+        } catch (error) {
+          if (flushTimer !== null) {
+            window.clearTimeout(flushTimer)
+            flushTimer = null
+          }
+          flushPending()
+          if (error instanceof DOMException && error.name === 'AbortError') {
+            if (assistantContent.trim().length > 0) {
+              const { message: assistantMessage, updatedAt } = await addRemoteMessage(
+                sessionId,
+                user.id,
+                'assistant',
+                assistantContent,
+                assistantClientId,
+                assistantClientCreatedAt,
+                buildAssistantMeta(false),
+              )
+              const updatedMessages = updateMessage(messagesRef.current, {
+                ...assistantMessage,
+                pending: false,
+              })
+              const updatedSessions = sessionsRef.current.map((session) =>
+                session.id === sessionId ? { ...session, updatedAt } : session,
+              )
+              applySnapshot(updatedSessions, updatedMessages)
+            } else {
+              const abortedMessages = updateMessage(messagesRef.current, {
+                id: assistantClientId,
+                sessionId,
+                role: 'assistant',
+                clientId: assistantClientId,
+                content: assistantContent,
+                createdAt: assistantClientCreatedAt,
+                clientCreatedAt: assistantClientCreatedAt,
+                meta: buildAssistantMeta(false),
+                pending: false,
+              })
+              applySnapshot(sessionsRef.current, abortedMessages)
+            }
+            return
+          }
+          console.warn('流式回复失败', error)
+          const failedMessages = updateMessage(messagesRef.current, {
+            id: assistantClientId,
+            sessionId,
+            role: 'assistant',
+            clientId: assistantClientId,
+            content: assistantContent || '回复失败，请稍后重试。',
+            createdAt: assistantClientCreatedAt,
+            clientCreatedAt: assistantClientCreatedAt,
+            meta: buildAssistantMeta(false),
+            pending: false,
+          })
+          applySnapshot(sessionsRef.current, failedMessages)
+          window.alert('回复失败，请稍后重试。')
+        } finally {
+          setIsStreaming(false)
+          streamingControllerRef.current = null
+        }
+      }
+
+      void persist()
+    },
+    [applySnapshot, resolveSessionReasoning, resolveSessionModel, user],
+  )
+
+  const handleStopStreaming = useCallback(() => {
+    streamingControllerRef.current?.abort()
+    setIsStreaming(false)
+  }, [])
+
+  const removeMessage = useCallback(
+    async (messageId: string) => {
+      const targetMessage = messagesRef.current.find(
+        (message) => message.id === messageId || message.clientId === messageId,
+      )
+      if (targetMessage?.pending) {
+        const nextMessages = messagesRef.current.filter(
+          (message) => message.id !== messageId && message.clientId !== messageId,
+        )
+        applySnapshot(sessionsRef.current, nextMessages)
+        return
+      }
+      if (user && supabase) {
+        try {
+          await deleteRemoteMessage(messageId)
+          const nextMessages = messagesRef.current.filter(
+            (message) => message.id !== messageId && message.clientId !== messageId,
+          )
+          applySnapshot(sessionsRef.current, nextMessages)
+          return
+        } catch (error) {
+          console.warn('删除云端消息失败，已切换本地存储', error)
+        }
+      }
+      deleteMessage(messageId)
+      setMessages((prev) =>
+        prev.filter((message) => message.id !== messageId && message.clientId !== messageId),
+      )
+    },
+    [applySnapshot, user],
+  )
+
+  const removeSession = useCallback(
+    async (sessionId: string) => {
+      if (user && supabase) {
+        try {
+          await deleteRemoteSession(sessionId)
+          const nextSessions = sessionsRef.current.filter(
+            (session) => session.id !== sessionId,
+          )
+          const nextMessages = messagesRef.current.filter(
+            (message) => message.sessionId !== sessionId,
+          )
+          applySnapshot(nextSessions, nextMessages)
+          return
+        } catch (error) {
+          console.warn('删除云端会话失败，已切换本地存储', error)
+        }
+      }
+      deleteSession(sessionId)
+      setSessions((prev) => prev.filter((session) => session.id !== sessionId))
+      setMessages((prev) => prev.filter((message) => message.sessionId !== sessionId))
+    },
+    [applySnapshot, user],
+  )
+
+  const handleSaveSettings = useCallback(async (nextSettings: UserSettings) => {
+    if (user && supabase) {
+      await updateUserSettings(nextSettings)
+    }
+    setUserSettings(nextSettings)
+  }, [user])
+
+  const handleDisableRpReasoning = useCallback(async () => {
+    if (!user) {
+      return
+    }
+    const current = settingsRef.current ?? createDefaultSettings(user.id)
+    if (!current.rpReasoningEnabled) {
+      return
+    }
+    const nextSettings: UserSettings = {
+      ...current,
+      userId: user.id,
+      rpReasoningEnabled: false,
+      updatedAt: new Date().toISOString(),
+    }
+    if (supabase) {
+      await updateUserSettings(nextSettings)
+    }
+    setUserSettings(nextSettings)
+  }, [user])
+
+  const handleSaveMemoryExtractModel = useCallback(async (modelId: string | null) => {
+    if (!user) {
+      return
+    }
+    const normalizedModel = modelId?.trim() ? modelId.trim() : null
+    if (supabase) {
+      await saveMemoryExtractModel(user.id, normalizedModel)
+    }
+    setUserSettings((current) => {
+      const base = current ?? createDefaultSettings(user.id)
+      return {
+        ...base,
+        userId: user.id,
+        memoryExtractModel: normalizedModel,
+        updatedAt: new Date().toISOString(),
+      }
+    })
+  }, [user])
+
+  const handleSaveSnackSystemPrompt = useCallback(async (nextSnackSystemPrompt: string) => {
+    if (!user) {
+      return
+    }
+    const nextSettings = {
+      ...(settingsRef.current ?? createDefaultSettings(user.id)),
+      userId: user.id,
+      snackSystemOverlay: nextSnackSystemPrompt,
+      updatedAt: new Date().toISOString(),
+    }
+    if (supabase) {
+      await saveSnackSystemPrompt(user.id, nextSnackSystemPrompt)
+    }
+    setUserSettings(nextSettings)
+  }, [user])
+  const handleSaveSyzygyPostSystemPrompt = useCallback(async (nextPrompt: string) => {
+    if (!user) {
+      return
+    }
+    const nextSettings = {
+      ...(settingsRef.current ?? createDefaultSettings(user.id)),
+      userId: user.id,
+      syzygyPostSystemPrompt: nextPrompt,
+      updatedAt: new Date().toISOString(),
+    }
+    if (supabase) {
+      await saveSyzygyPostSystemPrompt(user.id, nextPrompt)
+    }
+    setUserSettings(nextSettings)
+  }, [user])
+
+  const handleSaveSyzygyReplySystemPrompt = useCallback(async (nextPrompt: string) => {
+    if (!user) {
+      return
+    }
+    const nextSettings = {
+      ...(settingsRef.current ?? createDefaultSettings(user.id)),
+      userId: user.id,
+      syzygyReplySystemPrompt: nextPrompt,
+      updatedAt: new Date().toISOString(),
+    }
+    if (supabase) {
+      await saveSyzygyReplySystemPrompt(user.id, nextPrompt)
+    }
+    setUserSettings(nextSettings)
+  }, [user])
+
+
+  const handleSaveLetterReplySystemPrompt = useCallback(async (nextPrompt: string) => {
+    if (!user) {
+      return
+    }
+    const nextSettings = {
+      ...(settingsRef.current ?? createDefaultSettings(user.id)),
+      userId: user.id,
+      letterReplySystemPrompt: nextPrompt,
+      updatedAt: new Date().toISOString(),
+    }
+    if (supabase) {
+      await saveLetterReplySystemPrompt(user.id, nextPrompt)
+    }
+    setUserSettings(nextSettings)
+  }, [user])
+
+  const handleSaveBubbleChatSettings = useCallback(async (values: {
+    bubbleChatModel: string | null
+    bubbleChatSystemPrompt: string
+    bubbleChatMaxTokens: number
+    bubbleChatTemperature: number
+  }) => {
+    if (!user) {
+      return
+    }
+    const nextSettings = {
+      ...(settingsRef.current ?? createDefaultSettings(user.id)),
+      userId: user.id,
+      bubbleChatModel: values.bubbleChatModel,
+      bubbleChatSystemPrompt: values.bubbleChatSystemPrompt,
+      bubbleChatMaxTokens: values.bubbleChatMaxTokens,
+      bubbleChatTemperature: values.bubbleChatTemperature,
+      updatedAt: new Date().toISOString(),
+    }
+    if (supabase) {
+      await saveBubbleChatSettings(user.id, values)
+    }
+    setUserSettings(nextSettings)
+  }, [user])
+
+  const handleSaveLoungeScenePrompt = useCallback(async (nextPrompt: string) => {
+    if (!user) {
+      return
+    }
+    const nextSettings = {
+      ...(settingsRef.current ?? createDefaultSettings(user.id)),
+      userId: user.id,
+      loungeScenePrompt: nextPrompt,
+      updatedAt: new Date().toISOString(),
+    }
+    if (supabase) {
+      await saveLoungeScenePrompt(user.id, nextPrompt)
+    }
+    setUserSettings(nextSettings)
+  }, [user])
+
+  const handleToggleMemoryAutoExtract = useCallback(async (enabled: boolean) => {
+    if (!user) {
+      return
+    }
+    const nextSettings = {
+      ...(settingsRef.current ?? createDefaultSettings(user.id)),
+      userId: user.id,
+      memoryAutoExtractEnabled: enabled,
+      updatedAt: new Date().toISOString(),
+    }
+    if (supabase) {
+      await saveMemoryAutoExtractEnabled(user.id, enabled)
+    }
+    setUserSettings(nextSettings)
+  }, [user])
+
+  useEffect(() => {
+    if (!user || !supabase || isStreaming || !activeSettings.memoryAutoExtractEnabled) {
+      return
+    }
+    const latestBySession = new Map<string, number>()
+    messages.forEach((message) => {
+      if (message.role !== 'user' || !message.content.trim()) {
+        return
+      }
+      latestBySession.set(message.sessionId, (latestBySession.get(message.sessionId) ?? 0) + 1)
+    })
+
+    latestBySession.forEach((userCount, sessionId) => {
+      if (userCount < AUTO_EXTRACT_USER_TURN_INTERVAL) {
+        return
+      }
+      if (userCount % AUTO_EXTRACT_USER_TURN_INTERVAL !== 0) {
+        return
+      }
+      const currentState =
+        autoExtractStateRef.current[sessionId] ?? { lastUserCount: 0, lastExtractedAt: 0 }
+      const now = Date.now()
+      if (userCount <= currentState.lastUserCount) {
+        return
+      }
+      if (now - currentState.lastExtractedAt < AUTO_EXTRACT_COOLDOWN_MS) {
+        return
+      }
+      autoExtractStateRef.current[sessionId] = {
+        lastUserCount: userCount,
+        lastExtractedAt: currentState.lastExtractedAt,
+      }
+      const recentMessages = buildRecentExtractionMessages(
+        sessionId,
+        messagesRef.current,
+        MEMORY_EXTRACT_RECENT_MESSAGES,
+      )
+      if (recentMessages.length === 0) {
+        return
+      }
+      void (async () => {
+        try {
+          const pendingCount = await fetchPendingMemoryCount(user.id)
+          if (pendingCount >= AUTO_EXTRACT_PENDING_LIMIT) {
+            return
+          }
+          autoExtractStateRef.current[sessionId] = {
+            lastUserCount: userCount,
+            lastExtractedAt: Date.now(),
+          }
+          await invokeMemoryExtraction(recentMessages, activeSettings.memoryMergeEnabled)
+        } catch (error) {
+          console.warn('自动抽取记忆建议失败', error)
+        }
+      })()
+    })
+  }, [activeSettings.memoryAutoExtractEnabled, activeSettings.memoryMergeEnabled, isStreaming, messages, user])
+
+
+  if (displayMode === 'game') {
+    return (
+      <>
+        <Suspense
+          fallback={
+            <div className="app-shell game-mode-shell">
+              <div className="game-mode-loading">游戏模式加载中...</div>
+            </div>
+          }
+        >
+          <GameModeShell
+            onSwitchToPhoneMode={() => {
+              setIsChatOpenedFromGameMode(false)
+              setDisplayMode('phone')
+            }}
+            onOpenSharedSettings={() => {
+              setIsChatOpenedFromGameMode(false)
+              setDisplayMode('phone')
+              navigate('/settings')
+            }}
+            onOpenChat={openChatFromGameMode}
+            user={user}
+            hasUnreadLetters={hasUnreadLetters}
+            snackAiConfig={snackAiConfig}
+            syzygyAiConfig={syzygyAiConfig}
+            bubbleChatConfig={bubbleChatConfig}
+          />
+        </Suspense>
+        {letterToast ? (
+          <div className="app-toast-stack" aria-live="polite" aria-atomic="true">
+            <div key={letterToast.id} className="app-toast app-toast--letter" role="status">
+              <span className="app-toast__icon" aria-hidden="true">💌</span>
+              <span>{letterToast.message}</span>
+            </div>
+          </div>
+        ) : null}
+      </>
+    )
+  }
+
+  return (
+    <div
+      className="app-shell"
+      style={{ '--app-background-image': appBackgroundImage ? `url(${appBackgroundImage})` : 'none' } as CSSProperties}
+    >
+      <Routes>
+        <Route path="/auth" element={<AuthPage user={user} />} />
+        <Route
+          path="/conversation-canary"
+          element={
+            <RequireAuth ready={authReady} user={user}>
+              <ConversationCanaryPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/runtime-control-canary"
+          element={
+            <RequireAuth ready={authReady} user={user}>
+              <RuntimeControlCanaryPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/"
+          element={
+            <RequireAuth ready={authReady} user={user}>
+              <HomePage
+                user={user}
+                hasUnreadLetters={hasUnreadLetters}
+                onOpenChat={() => {
+                  const latest = selectMostRecentSession(sessions)
+                  if (latest) {
+                    openChatFromPhoneMode(latest.id)
+                    return
+                  }
+                  void createSessionEntry().then((session) => {
+                    openChatFromPhoneMode(session.id)
+                  })
+                }}
+              />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/home"
+          element={<Navigate to="/" replace />}
+        />
+        <Route
+          path="/home-layout"
+          element={
+            <RequireAuth ready={authReady} user={user}>
+              <HomeLayoutSettingsPage
+                user={user}
+                onOpenChat={() => {
+                  const latest = selectMostRecentSession(sessions)
+                  if (latest) {
+                    openChatFromPhoneMode(latest.id)
+                    return
+                  }
+                  void createSessionEntry().then((session) => {
+                    openChatFromPhoneMode(session.id)
+                  })
+                }}
+              />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/chat"
+          element={
+            <RequireAuth ready={authReady} user={user}>
+              <NewSessionRedirect
+                sessions={sessions}
+                sessionsReady={sessionsReady}
+                onCreateSession={createSessionEntry}
+              />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/forum"
+          element={
+            <RequireAuth ready={authReady} user={user}>
+              <ForumPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/forum/new"
+          element={
+            <RequireAuth ready={authReady} user={user}>
+              <ForumNewThreadPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/forum/thread/:id"
+          element={
+            <RequireAuth ready={authReady} user={user}>
+              <ForumThreadPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/forum/settings"
+          element={
+            <RequireAuth ready={authReady} user={user}>
+              <ForumSettingsPage user={user} />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/letters"
+          element={
+            <RequireAuth ready={authReady} user={user}>
+              <LettersPage
+                sessions={sessions}
+                onCreateSession={createSessionEntry}
+                onUnreadStateChange={setHasUnreadLetters}
+              />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/chat/:sessionId"
+          element={
+            <RequireAuth ready={authReady} user={user}>
+              <ChatRoute
+                sessions={sessions}
+                messages={messages}
+                messageCounts={messageCounts}
+                drawerOpen={drawerOpen}
+                syncing={syncing}
+                sessionsReady={sessionsReady}
+                isStreaming={isStreaming}
+                onStopStreaming={handleStopStreaming}
+                onOpenDrawer={() => setDrawerOpen(true)}
+                onCloseDrawer={() => setDrawerOpen(false)}
+                onCreateSession={createSessionEntry}
+                onRenameSession={renameSessionEntry}
+                onSendMessage={sendMessage}
+                onDeleteMessage={removeMessage}
+                onDeleteSession={removeSession}
+                enabledModels={enabledModels}
+                defaultModel={defaultModelId}
+                onSelectModel={handleSessionOverrideChange}
+                defaultReasoning={activeSettings.chatReasoningEnabled}
+                onSelectReasoning={handleSessionReasoningOverrideChange}
+                onArchiveSession={handleSessionArchiveStateChange}
+                onActiveSessionChange={handleActiveSessionChange}
+                user={user}
+                onReturnToGame={isChatOpenedFromGameMode ? handleReturnToGameFromChat : undefined}
+                chatTheme={isChatOpenedFromGameMode ? 'pixel' : 'ios'}
+              />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/checkin"
+          element={
+            <RequireAuth ready={authReady} user={user}>
+              <CheckinPage user={user} />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/export"
+          element={
+            <RequireAuth ready={authReady} user={user}>
+              <ExportPage user={user} />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/rp"
+          element={
+            <RequireAuth ready={authReady} user={user}>
+              <RpRoomsPage user={user} />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/rp/:sessionId"
+          element={
+            <RequireAuth ready={authReady} user={user}>
+              <RpRoomPage user={user} mode="chat" rpReasoningEnabled={activeSettings.rpReasoningEnabled} rpHighThinkingEnabled={activeSettings.rpHighThinkingEnabled} onDisableRpReasoning={handleDisableRpReasoning} />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/rp/:sessionId/dashboard"
+          element={
+            <RequireAuth ready={authReady} user={user}>
+              <RpRoomPage user={user} mode="dashboard" rpReasoningEnabled={activeSettings.rpReasoningEnabled} rpHighThinkingEnabled={activeSettings.rpHighThinkingEnabled} onDisableRpReasoning={handleDisableRpReasoning} />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/rp/story-groups"
+          element={
+            <RequireAuth ready={authReady} user={user}>
+              <StoryGroupPage user={user} />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/settings"
+          element={
+            <RequireAuth ready={authReady} user={user}>
+              <SettingsPage
+                user={user}
+                settings={userSettings}
+                ready={settingsReady}
+                onSaveSettings={handleSaveSettings}
+                onSaveMemoryExtractModel={handleSaveMemoryExtractModel}
+                onSaveSnackSystemPrompt={handleSaveSnackSystemPrompt}
+                onSaveSyzygyPostPrompt={handleSaveSyzygyPostSystemPrompt}
+                onSaveSyzygyReplyPrompt={handleSaveSyzygyReplySystemPrompt}
+                onSaveLetterReplyPrompt={handleSaveLetterReplySystemPrompt}
+                onSaveBubbleChatSettings={handleSaveBubbleChatSettings}
+                displayMode={displayMode}
+                onDisplayModeChange={setDisplayMode}
+              />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/snacks"
+          element={
+            <RequireAuth ready={authReady} user={user}>
+              <SnacksPage user={user} snackAiConfig={snackAiConfig} />
+            </RequireAuth>
+          }
+        />
+
+        <Route
+          path="/memory-vault"
+          element={
+            <RequireAuth ready={authReady} user={user}>
+              <MemoryVaultPage
+                recentMessages={buildRecentExtractionMessages(
+                  activeChatSessionId ?? latestSession?.id ?? '',
+                  messages,
+                  MEMORY_EXTRACT_RECENT_MESSAGES,
+                )}
+                autoExtractEnabled={activeSettings.memoryAutoExtractEnabled}
+                onToggleAutoExtract={handleToggleMemoryAutoExtract}
+              />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/syzygy"
+          element={
+            <RequireAuth ready={authReady} user={user}>
+              <SyzygyFeedPage user={user} snackAiConfig={syzygyAiConfig} />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/feed"
+          element={
+            <RequireAuth ready={authReady} user={user}>
+              <AgentFeedPage user={user} />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/memo"
+          element={
+            <RequireAuth ready={authReady} user={user}>
+              <MemoPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/council"
+          element={
+            <RequireAuth ready={authReady} user={user}>
+              <AgentCouncilPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/archive"
+          element={
+            <RequireAuth ready={authReady} user={user}>
+              <ArchivePage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/lounge"
+          element={
+            <RequireAuth ready={authReady} user={user}>
+              <LoungePage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/lounge/:sofaId"
+          element={
+            <RequireAuth ready={authReady} user={user}>
+              <LoungeRoomPage
+                user={user}
+                aiConfig={loungeAiConfig}
+                onSaveLoungeScenePrompt={handleSaveLoungeScenePrompt}
+              />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/timeline"
+          element={
+            <RequireAuth ready={authReady} user={user}>
+              <TimelinePage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/todo"
+          element={
+            <RequireAuth ready={authReady} user={user}>
+              <TodoPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/hamster-console"
+          element={
+            <RequireAuth ready={authReady} user={user}>
+              <HamsterConsolePage user={user} />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/wallet"
+          element={
+            <RequireAuth ready={authReady} user={user}>
+              <WalletPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/novels"
+          element={
+            <RequireAuth ready={authReady} user={user}>
+              <NovelPage user={user} />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/wiki"
+          element={
+            <RequireAuth ready={authReady} user={user}>
+              <WikiPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/knowledge"
+          element={
+            <RequireAuth ready={authReady} user={user}>
+              <Suspense fallback={null}>
+                <KnowledgeLibraryPage />
+              </Suspense>
+            </RequireAuth>
+          }
+        />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+      {letterToast ? (
+        <div className="app-toast-stack" aria-live="polite" aria-atomic="true">
+          <div key={letterToast.id} className="app-toast app-toast--letter" role="status">
+            <span className="app-toast__icon" aria-hidden="true">💌</span>
+            <span>{letterToast.message}</span>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+const RequireAuth = ({
+  ready,
+  user,
+  children,
+}: {
+  ready: boolean
+  user: User | null
+  children: ReactNode
+}) => {
+  if (!ready) {
+    return (
+      <div className="loading-state">
+        <p>正在检查登录状态...</p>
+      </div>
+    )
+  }
+  if (!user) {
+    return <Navigate to="/auth" replace />
+  }
+  return children
+}
+
+const NewSessionRedirect = ({
+  sessions,
+  sessionsReady,
+  onCreateSession,
+}: {
+  sessions: ChatSession[]
+  sessionsReady: boolean
+  onCreateSession: (title?: string) => Promise<ChatSession>
+}) => {
+  const navigate = useNavigate()
+  const hasInitializedRef = useRef(false)
+  useEffect(() => {
+    if (hasInitializedRef.current) {
+      return
+    }
+    if (!sessionsReady) {
+      return
+    }
+    hasInitializedRef.current = true
+    let active = true
+    const create = async () => {
+      if (sessions.length > 0) {
+        const targetSession = selectMostRecentSession(sessions)
+        if (targetSession) {
+          navigate(`/chat/${targetSession.id}`, { replace: true })
+        }
+        return
+      }
+      const newSession = await onCreateSession()
+      if (!active) {
+        return
+      }
+      navigate(`/chat/${newSession.id}`, { replace: true })
+    }
+    create()
+    return () => {
+      active = false
+    }
+  }, [navigate, onCreateSession, sessions, sessionsReady])
+  return null
+}
+
+const ChatRoute = ({
+  sessions,
+  messages,
+  messageCounts,
+  drawerOpen,
+  syncing,
+  sessionsReady,
+  isStreaming,
+  onStopStreaming,
+  onOpenDrawer,
+  onCloseDrawer,
+  onCreateSession,
+  onRenameSession,
+  onSendMessage,
+  onDeleteMessage,
+  onDeleteSession,
+  enabledModels,
+  defaultModel,
+  onSelectModel,
+  defaultReasoning,
+  onSelectReasoning,
+  onArchiveSession,
+  onActiveSessionChange,
+  user,
+  onReturnToGame,
+  chatTheme,
+}: {
+  sessions: ChatSession[]
+  messages: ChatMessage[]
+  messageCounts: Record<string, number>
+  drawerOpen: boolean
+  syncing: boolean
+  sessionsReady: boolean
+  isStreaming: boolean
+  onStopStreaming: () => void
+  onOpenDrawer: () => void
+  onCloseDrawer: () => void
+  onCreateSession: (title?: string) => Promise<ChatSession>
+  onRenameSession: (sessionId: string, title: string) => Promise<void>
+  onSendMessage: (sessionId: string, text: string, injectionOptions?: ChatInjectionOptions) => Promise<void>
+  onDeleteMessage: (messageId: string) => Promise<void>
+  onDeleteSession: (sessionId: string) => Promise<void>
+  enabledModels: string[]
+  defaultModel: string
+  onSelectModel: (sessionId: string, model: string | null) => Promise<void>
+  defaultReasoning: boolean
+  onSelectReasoning: (sessionId: string, reasoning: boolean | null) => Promise<void>
+  onArchiveSession: (sessionId: string, isArchived: boolean) => Promise<void>
+  onActiveSessionChange: (sessionId: string) => void
+  user: User | null
+  onReturnToGame?: () => void
+  chatTheme: 'ios' | 'pixel'
+}) => {
+  const { sessionId } = useParams()
+  const navigate = useNavigate()
+  const [pendingCreatedSessionId, setPendingCreatedSessionId] = useState<string | null>(null)
+
+  const activeSession = sessions.find((session) => session.id === sessionId)
+
+  useEffect(() => {
+    if (activeSession) {
+      onActiveSessionChange(activeSession.id)
+    }
+  }, [activeSession, onActiveSessionChange])
+  const activeMessages = useMemo(() => {
+    return messages
+      .filter((message) => message.sessionId === sessionId)
+      .sort(
+        (a, b) =>
+          new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime() ||
+          new Date(a.clientCreatedAt ?? a.createdAt).getTime() -
+            new Date(b.clientCreatedAt ?? b.createdAt).getTime(),
+      )
+  }, [messages, sessionId])
+
+  const handleCreateSession = useCallback(async () => {
+    const newSession = await onCreateSession()
+    setPendingCreatedSessionId(newSession.id)
+    navigate(`/chat/${newSession.id}`)
+    onCloseDrawer()
+  }, [navigate, onCloseDrawer, onCreateSession])
+
+  const handleSelectSession = useCallback(
+    (id: string) => {
+      navigate(`/chat/${id}`)
+      onCloseDrawer()
+    },
+    [navigate, onCloseDrawer],
+  )
+
+  const handleDeleteSession = useCallback(
+    async (id: string) => {
+      let nextSessionId: string | null = null
+      if (activeSession?.id === id) {
+        const remaining = sessions.filter((session) => session.id !== id)
+        if (remaining.length > 0) {
+          nextSessionId = remaining[0].id
+        } else {
+          const newSession = await onCreateSession('新会话')
+          nextSessionId = newSession.id
+        }
+      }
+
+      if (nextSessionId) {
+        navigate(`/chat/${nextSessionId}`, { replace: true })
+      }
+      await onDeleteSession(id)
+    },
+    [activeSession?.id, navigate, onCreateSession, onDeleteSession, sessions],
+  )
+
+  useEffect(() => {
+    if (activeSession || sessions.length === 0) {
+      return
+    }
+    if (sessionId && sessionId === pendingCreatedSessionId) {
+      return
+    }
+    const targetSession = selectMostRecentSession(sessions)
+    if (targetSession) {
+      navigate(`/chat/${targetSession.id}`, { replace: true })
+    }
+  }, [activeSession, navigate, pendingCreatedSessionId, sessionId, sessions])
+
+  useEffect(() => {
+    if (activeSession || syncing || !sessionsReady || sessions.length > 0) {
+      return
+    }
+    let active = true
+    const createSession = async () => {
+      const newSession = await onCreateSession('新会话')
+      if (!active) {
+        return
+      }
+      navigate(`/chat/${newSession.id}`, { replace: true })
+    }
+    void createSession()
+    return () => {
+      active = false
+    }
+  }, [activeSession, navigate, onCreateSession, sessions.length, sessionsReady, syncing])
+
+  if (!activeSession) {
+    return null
+  }
+
+  return (
+    <>
+      <ChatPage
+        session={activeSession}
+        messages={activeMessages}
+        onOpenDrawer={onOpenDrawer}
+        onSendMessage={(text, options) => onSendMessage(activeSession.id, text, options)}
+        onDeleteMessage={onDeleteMessage}
+        isStreaming={isStreaming}
+        onStopStreaming={onStopStreaming}
+        enabledModels={enabledModels}
+        defaultModel={defaultModel}
+        onSelectModel={(model) => onSelectModel(activeSession.id, model)}
+        defaultReasoning={defaultReasoning}
+        onSelectReasoning={(reasoning) =>
+          onSelectReasoning(activeSession.id, reasoning)
+        }
+        user={user}
+        onReturnToGame={onReturnToGame}
+        theme={chatTheme}
+      />
+      <SessionsDrawer
+        open={drawerOpen}
+        theme={chatTheme}
+        sessions={sessions}
+        messageCounts={messageCounts}
+        activeSessionId={activeSession.id}
+        syncing={syncing}
+        onClose={onCloseDrawer}
+        onCreateSession={handleCreateSession}
+        onSelectSession={handleSelectSession}
+        onRenameSession={onRenameSession}
+        onDeleteSession={handleDeleteSession}
+        onArchiveSession={onArchiveSession}
+      />
+    </>
+  )
+}
+
+export default App
